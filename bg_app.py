@@ -3,137 +3,105 @@ import pandas as pd
 from datetime import datetime
 import os
 
-# --- 1. DYNAMIC WORKER MANAGEMENT ---
-# Using a local file to ensure worker lists persist across app restarts
+# --- 1. DYNAMIC DATA MANAGEMENT ---
 WORKER_FILE = "bg_workers.txt"
-if not os.path.exists(WORKER_FILE):
-    with open(WORKER_FILE, "w") as f:
-        f.write("Suresh,Ramesh,Kiran,Mehta")
+JOB_FILE = "bg_jobs.txt"
 
-def get_workers():
-    with open(WORKER_FILE, "r") as f:
-        content = f.read().strip()
-        # Returns a clean list of names
-        return [w.strip() for w in content.split(",") if w.strip()]
+# Initialize files if they don't exist
+for file, default in [(WORKER_FILE, "Suresh,Ramesh,Kiran"), (JOB_FILE, "JOB-101,DIST-05,VESSEL-02")]:
+    if not os.path.exists(file):
+        with open(file, "w") as f: f.write(default)
 
-# --- 2. MASTER DATA CONFIGURATION ---
-valid_units = ["A", "B", "C"]
-# Critical for your estimation team to track project-specific costs
-valid_jobs = ["JOB-101", "DIST-05", "VESSEL-02", "REACTOR-01"]
+def get_list(filepath):
+    with open(filepath, "r") as f:
+        return [item.strip() for item in f.read().split(",") if item.strip()]
 
-# High-precision activity mapping for pharma-grade fabrication
-activity_map = {
-    "Welder": ["Meters Weld"],
-    "Fitter": ["Shell to Shell", "Top Dish Nozzle Fitup", "Rolling", "Marking", "Assembly"],
-    "Buffer": ["Rough Polish", "Matt Finish", "Mirror Polish"],
-    "Grinder": ["Grinding Work"],
-    "Turner": ["Flange Machining", "Shaft Machining", "General Machining"],
-    "Cutting": ["Plasma Cutting", "Gas Cutting", "Shearing"],
-    "Driller": ["Hole Drilling"],
-    "Other Works": ["Hydrotest", "Trial Run", "Pickling/Passivation", "Maintenance"]
-}
-
-# --- 3. SECURITY & AUTHENTICATION ---
+# --- 2. SECURITY ---
 def check_auth():
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
     if not st.session_state["authenticated"]:
         st.title("🔐 B&G Secure Access")
-        pwd = st.text_input("Enter Shopfloor Password", type="password")
+        pwd = st.text_input("Enter Password", type="password")
         if st.button("Log In"):
-            if pwd == "BG2026": # Your standard Monday launch password
+            if pwd == "BG2026": #
                 st.session_state["authenticated"] = True
                 st.rerun()
-            else:
-                st.error("Invalid Password")
+            else: st.error("Invalid Password")
         return False
     return True
 
-# --- 4. MAIN APPLICATION ---
 if check_auth():
     st.title("🏗️ B&G Engineering: Shopfloor Monitor")
 
-    # --- SIDEBAR: NAVIGATION & ADMIN TOOLS ---
+    # SIDEBAR: NAVIGATION & ADMIN
     st.sidebar.header("Navigation")
-    selected_unit = st.sidebar.selectbox("Current Unit", valid_units)
+    selected_unit = st.sidebar.selectbox("Current Unit", ["A", "B", "C"])
     filter_date = st.sidebar.date_input("View Records For", datetime.now())
-    
-    # Organized Admin Section to prevent display issues
-    with st.sidebar.expander("⚙️ Admin: Staff Management", expanded=False):
-        st.subheader("➕ Add New Staff")
-        add_name = st.text_input("New Worker Name")
-        if st.button("Register Worker"):
-            workers = get_workers()
-            if add_name and add_name not in workers:
-                with open(WORKER_FILE, "a") as f:
-                    f.write(f",{add_name}")
-                st.success(f"Added {add_name}!")
+
+    # --- ADMIN DRAWER: STAFF & JOBS ---
+    with st.sidebar.expander("⚙️ Admin: Manage Staff & Jobs"):
+        # Staff Management
+        st.subheader("👥 Workers")
+        new_w = st.text_input("Add Worker")
+        if st.button("Add Worker"):
+            if new_w and new_w not in get_list(WORKER_FILE):
+                with open(WORKER_FILE, "a") as f: f.write(f",{new_w}")
+                st.rerun()
+        
+        rem_w = st.selectbox("Remove Worker", get_list(WORKER_FILE))
+        if st.button("Delete Worker"):
+            w_list = get_list(WORKER_FILE)
+            if len(w_list) > 1:
+                w_list.remove(rem_w)
+                with open(WORKER_FILE, "w") as f: f.write(",".join(w_list))
                 st.rerun()
 
         st.divider()
 
-        st.subheader("🗑️ Remove Staff")
-        current_staff = get_workers()
-        rem_name = st.selectbox("Select Staff to Remove", current_staff)
-        if st.button("Delete Worker"):
-            if len(current_staff) > 1:
-                current_staff.remove(rem_name)
-                with open(WORKER_FILE, "w") as f:
-                    f.write(",".join(current_staff))
-                st.warning(f"Removed {rem_name}")
+        # Job Management (The New Feature)
+        st.subheader("📁 Job Codes")
+        new_j = st.text_input("Add New Job Code")
+        if st.button("Add Job"):
+            if new_j and new_j not in get_list(JOB_FILE):
+                with open(JOB_FILE, "a") as f: f.write(f",{new_j}")
                 st.rerun()
-            else:
-                st.error("Cannot delete the last worker.")
+        
+        rem_j = st.selectbox("Remove Old Job", get_list(JOB_FILE))
+        if st.button("Delete Job Code"):
+            j_list = get_list(JOB_FILE)
+            if len(j_list) > 1:
+                j_list.remove(rem_j)
+                with open(JOB_FILE, "w") as f: f.write(",".join(j_list))
+                st.rerun()
 
-    # --- 5. DATA ENTRY SECTION ---
+    # --- 3. DATA ENTRY ---
+    activity_map = {
+        "Welder": ["Meters Weld"],
+        "Fitter": ["Shell to Shell", "Top Dish Nozzle Fitup", "Rolling", "Marking", "Assembly"],
+        "Buffer": ["Rough Polish", "Matt Finish", "Mirror Polish"],
+        "Grinder": ["Grinding Work"],
+        "Turner": ["Flange Machining", "Shaft Machining", "General Machining"],
+        "Cutting": ["Plasma Cutting", "Gas Cutting", "Shearing"],
+        "Driller": ["Hole Drilling"],
+        "Other Works": ["Hydrotest", "Trial Run", "Pickling/Passivation"]
+    }
+
     st.subheader(f"Log Entry: Unit {selected_unit}")
     c1, c2 = st.columns(2)
-    
     with c1:
-        worker = st.selectbox("Worker Name", get_workers())
-        category = st.selectbox("Work Category", list(activity_map.keys()))
-        activity = st.selectbox("Specific Activity", activity_map[category])
-        job = st.selectbox("Job Code", valid_jobs)
-    
+        worker = st.selectbox("Worker", get_list(WORKER_FILE))
+        category = st.selectbox("Category", list(activity_map.keys()))
+        activity = st.selectbox("Activity", activity_map[category])
+        job = st.selectbox("Job Code", get_list(JOB_FILE)) # Now Dynamic!
     with c2:
-        # Essential for your Estimation Team
         hours = st.number_input("Man-Hours Spent", min_value=0.0, step=0.5)
-        
-        # Dynamic Measurement Labels
-        if category == "Welder": uom = "Meters"
-        elif category == "Buffer": uom = "Sq. Ft"
-        elif category == "Driller": uom = "No. of Holes"
-        elif category in ["Grinder", "Cutting"]: uom = "Meters"
-        else: uom = "Qty/Progress %"
-            
-        output = st.number_input(f"Output ({uom})", min_value=0.0, step=0.1)
+        output = st.number_input("Output Value", min_value=0.0, step=0.1)
 
-    remarks = st.text_input("Remarks (Efficiency bottlenecks/notes)")
+    remarks = st.text_input("Remarks")
 
     if st.button("Submit to Backend"):
         date_str = datetime.now().strftime("%Y-%m-%d")
-        time_str = datetime.now().strftime("%H:%M")
-        
-        # Row structure: Date, Time, Unit, Worker, Category, Activity, Job, Hours, Output, Remarks
-        row = f"{date_str},{time_str},{selected_unit},{worker},{category},{activity},{job},{hours},{output},{remarks}\n"
-        
-        # Saving to the versioned CSV log
-        with open("bg_production_log_v11.csv", "a") as f:
-            f.write(row)
-        st.success(f"Entry Recorded for {selected_unit}!")
-
-    # --- 6. EFFICIENCY DASHBOARD ---
-    st.divider()
-    if os.path.exists("bg_production_log_v11.csv"):
-        cols = ["Date","Time","Unit","Worker","Category","Activity","Job","Hours","Output","Remarks"]
-        df = pd.read_csv("bg_production_log_v11.csv", names=cols)
-        df['Date'] = pd.to_datetime(df['Date']).dt.date
-        
-        # Job-wise Man-Hour Accumulation to improve delivery efficiency
-        st.subheader("📊 Job-wise Man-Hour Accumulation")
-        job_summary = df.groupby("Job")["Hours"].sum()
-        st.bar_chart(job_summary)
-        
-        st.write(f"Today's Activity Log (Unit {selected_unit}):")
-        display_df = df[(df['Date'] == filter_date) & (df['Unit'] == selected_unit)]
-        st.dataframe(display_df, use_container_width=True)
+        row = f"{date_str},{selected_unit},{worker},{category},{activity},{job},{hours},{output},{remarks}\n"
+        with open("bg_production_log_v12.csv", "a") as f: f.write(row)
+        st.success("Entry Recorded!")
