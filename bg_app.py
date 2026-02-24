@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime
 import pytz
 import os
+from github import Github
 
 # --- 1. SETUP & TIMEZONE ---
 IST = pytz.timezone('Asia/Kolkata')
@@ -23,6 +24,29 @@ UNITS = {
 # EXACT HEADERS IN YOUR REQUIRED ORDER
 HEADERS = ["Timestamp", "Supervisor", "Worker", "Job_Code", "Activity", "Unit", "Output", "Hours", "Notes"]
 
+# --- 2. GITHUB SYNC FUNCTION ---
+def sync_to_github(file_path):
+    try:
+        if "GITHUB_TOKEN" in st.secrets:
+            token = st.secrets["GITHUB_TOKEN"]
+            repo_name = st.secrets["GITHUB_REPO"]
+            g = Github(token)
+            repo = g.get_repo(repo_name)
+            
+            with open(file_path, "r") as f:
+                content = f.read()
+            
+            try:
+                # Update existing file
+                contents = repo.get_contents(file_path)
+                repo.update_file(contents.path, f"Auto-log {datetime.now(IST)}", content, contents.sha)
+            except:
+                # Create file if it doesn't exist on GitHub
+                repo.create_file(file_path, "Initial Create", content)
+    except Exception as e:
+        st.error(f"GitHub Sync Error: {e}")
+
+# Helper for local lists
 def load_list(file_path, defaults):
     if os.path.exists(file_path):
         with open(file_path, "r") as f:
@@ -35,7 +59,7 @@ st.title("🏗️ B&G Production & Progress Tracker")
 workers = load_list(WORKERS_FILE, ["Prasanth", "RamaSai", "Subodth", "Naresh", "Ravindra"])
 job_list = load_list(JOBS_FILE, ["SSR501", "SSR502", "VESSEL-101"])
 
-# --- 2. ENTRY FORM ---
+# --- 3. ENTRY FORM ---
 with st.form("prod_form", clear_on_submit=True):
     col1, col2 = st.columns(2)
     with col1:
@@ -51,33 +75,33 @@ with st.form("prod_form", clear_on_submit=True):
 
     if st.form_submit_button("Submit Production Log"):
         ts = datetime.now(IST).strftime('%Y-%m-%d %H:%M')
-        # Create new entry with EXACT headers
         new_entry = pd.DataFrame([[ts, supervisor, worker, job_code, activity, unit, output, hours, notes]], columns=HEADERS)
         
         if os.path.exists(LOGS_FILE):
             df = pd.read_csv(LOGS_FILE)
-            # Automatic Fix: Move old data from "Job" or "Remarks" to our new headers
-            if 'Job' in df.columns: df['Job_Code'] = df['Job_Code'].fillna(df['Job'])
-            if 'Remarks' in df.columns: df['Notes'] = df['Notes'].fillna(df['Remarks'])
+            # Self-healing for old data
+            if 'Job' in df.columns: df = df.rename(columns={'Job': 'Job_Code'})
+            if 'Remarks' in df.columns: df = df.rename(columns={'Remarks': 'Notes'})
             df = pd.concat([df, new_entry], ignore_index=True)
         else:
             df = new_entry
         
         df.to_csv(LOGS_FILE, index=False)
-        st.success(f"✅ Logged at {ts}")
+        
+        # PUSH TO GITHUB
+        sync_to_github(LOGS_FILE)
+        
+        st.success(f"✅ Logged & Synced at {ts}")
         st.rerun()
 
-# --- 3. DATA VIEW (Both tables in your required format) ---
+# --- 4. DATA VIEW ---
 st.divider()
 if os.path.exists(LOGS_FILE):
     df = pd.read_csv(LOGS_FILE)
-    # Force all columns to appear in your exact order
     df = df.reindex(columns=HEADERS)
-    # Sort so newest is on top
     df_display = df.sort_values(by="Timestamp", ascending=False)
 
     st.subheader("📊 Job Progress Summary")
-    # Showing the full list as a summary (No grouping)
     st.table(df_display.head(10)) 
 
     with st.expander("🔍 View All Detailed Logs", expanded=True):
