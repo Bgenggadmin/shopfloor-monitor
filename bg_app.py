@@ -20,10 +20,10 @@ ACTIVITY_UNITS = {
     "Dispatch/Loading": "Weight (Tons/Kgs)"
 }
 
-# THE PERFECT COLUMN HEADERS
-PERFECT_HEADERS = [
-    "Timestamp", "Supervisor", "Worker", "Category", 
-    "Job_Code", "Activity", "Output", "Unit", "Hours", "Notes"
+# THE MASTER COLUMN HEADERS (Exactly as you want them displayed)
+COL_HEADERS = [
+    "Timestamp", "Supervisor", "Worker", "Job_Code", 
+    "Hours", "Activity", "Notes", "Category", "Output", "Unit"
 ]
 
 def load_list(file_path, defaults):
@@ -61,17 +61,22 @@ with st.form("prod_form", clear_on_submit=True):
     if st.form_submit_button("Submit Production Log"):
         timestamp = datetime.now(IST).strftime('%Y-%m-%d %H:%M')
         
+        # New entry mapping to the Master Headers
         new_entry = {
             "Timestamp": timestamp, "Supervisor": supervisor, "Worker": selected_worker,
-            "Category": category, "Job_Code": selected_job, "Activity": activity,
-            "Output": output_val, "Unit": unit_label, "Hours": hours, "Notes": notes
+            "Job_Code": selected_job, "Hours": hours, "Activity": activity,
+            "Notes": notes, "Category": category, "Output": output_val, "Unit": unit_label
         }
         
         if os.path.exists(LOGS_FILE):
             df = pd.read_csv(LOGS_FILE)
-            # SELF-HEALING: Rename old mismatched columns if they exist
-            df = df.rename(columns={"Job": "Job_Code", "Remarks": "Notes"})
-            # Fix for Entry 38/39 where some columns were missing
+            # FIX: If old data used 'Job', move it to 'Job_Code'
+            if 'Job' in df.columns:
+                df['Job_Code'] = df['Job_Code'].fillna(df['Job'])
+            # FIX: If old data used 'Remarks', move it to 'Notes'
+            if 'Remarks' in df.columns:
+                df['Notes'] = df['Notes'].fillna(df['Remarks'])
+                
             df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
         else:
             df = pd.DataFrame([new_entry])
@@ -85,20 +90,21 @@ st.divider()
 if os.path.exists(LOGS_FILE):
     df_view = pd.read_csv(LOGS_FILE)
     
-    # Force alignment to perfect headers
-    df_view = df_view.reindex(columns=PERFECT_HEADERS)
+    # FORCED CLEANUP: Ensure only our Master Headers are shown in the exact order
+    df_clean = df_view.reindex(columns=COL_HEADERS)
 
     st.subheader("📊 Job Progress Summary")
-    # Only group if data exists to prevent secondary errors
-    if not df_view.dropna(subset=['Job_Code', 'Activity']).empty:
-        summary = df_view.groupby(['Job_Code', 'Activity', 'Unit']).agg({
-            'Output': 'sum', 'Hours': 'sum'
-        })
-        st.table(summary)
+    # Group by Job_Code for the summary table
+    summary = df_clean.groupby(['Job_Code', 'Activity', 'Unit']).agg({
+        'Output': 'sum', 'Hours': 'sum'
+    }).reset_index()
+    st.table(summary)
 
-    with st.expander("🔍 View All Detailed Logs"):
-        st.dataframe(df_view.sort_values(by="Timestamp", ascending=False), use_container_width=True)
-        csv = df_view.to_csv(index=False).encode('utf-8')
+    with st.expander("🔍 View All Detailed Logs", expanded=True):
+        # Shows newest entries first with perfectly aligned columns
+        st.dataframe(df_clean.sort_values(by="Timestamp", ascending=False), use_container_width=True)
+        
+        csv = df_clean.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Excel Report", csv, f"BG_Prod_{datetime.now(IST).strftime('%d%m%Y')}.csv")
 else:
     st.info("No records found. Submit your first production log above.")
