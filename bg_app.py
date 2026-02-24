@@ -20,7 +20,7 @@ UNITS = {
     "Dispatch/Loading": "Weight (Tons/Kgs)"
 }
 
-# THE MASTER HEADERS YOU REQUESTED
+# THE HEADERS YOU WANT FOR BOTH TABLES
 HEADERS = ["Timestamp", "Supervisor", "Worker", "Job_Code", "Activity", "Unit", "Output", "Hours", "Notes"]
 
 # --- 2. GITHUB SYNC ---
@@ -33,7 +33,7 @@ def sync_to_github(file_path):
                 content = f.read()
             try:
                 contents = repo.get_contents(file_path)
-                repo.update_file(contents.path, f"Update {datetime.now(IST)}", content, contents.sha)
+                repo.update_file(contents.path, f"Sync {datetime.now(IST)}", content, contents.sha)
             except:
                 repo.create_file(file_path, "Initial Create", content)
     except Exception as e:
@@ -68,36 +68,36 @@ with st.form("prod_form", clear_on_submit=True):
     if st.form_submit_button("Submit Production Log"):
         ts = datetime.now(IST).strftime('%Y-%m-%d %H:%M')
         
-        # Create a clean dictionary for the new entry
-        new_entry = {
-            "Timestamp": ts, "Supervisor": supervisor, "Worker": worker,
-            "Job_Code": job_code, "Activity": activity, "Unit": unit,
-            "Output": output, "Hours": hours, "Notes": notes
-        }
+        # New Entry as a simple list
+        new_row = [ts, supervisor, worker, job_code, activity, unit, output, hours, notes]
         
-        # Append logic that avoids InvalidIndexError
         if os.path.exists(LOGS_FILE):
             df = pd.read_csv(LOGS_FILE)
-            # Standardize columns before adding new data
+            # Force cleanup of old/duplicate columns before adding
+            df = df.loc[:, ~df.columns.duplicated()]
             df = df.rename(columns={'Job': 'Job_Code', 'Remarks': 'Notes'})
-            df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
+            
+            # Create fresh DataFrame for the new row and append
+            new_df = pd.DataFrame([new_row], columns=HEADERS)
+            df = pd.concat([df[HEADERS], new_df], ignore_index=True)
         else:
-            df = pd.DataFrame([new_entry])
+            df = pd.DataFrame([new_row], columns=HEADERS)
         
-        # Save only the headers we want
-        df = df.reindex(columns=HEADERS)
+        # Save and Sync
         df.to_csv(LOGS_FILE, index=False)
         sync_to_github(LOGS_FILE)
         st.success(f"✅ Logged & Synced at {ts}")
         st.rerun()
 
-# --- 4. DATA VIEW ---
+# --- 4. DISPLAY (Identical Formats) ---
 st.divider()
 if os.path.exists(LOGS_FILE):
+    # Always read and force the HEADERS order
     df_view = pd.read_csv(LOGS_FILE).reindex(columns=HEADERS)
     df_display = df_view.sort_values(by="Timestamp", ascending=False)
 
     st.subheader("📊 Job Progress Summary")
+    # Using .head(10) so the summary is quick to read
     st.table(df_display.head(10)) 
 
     with st.expander("🔍 View All Detailed Logs", expanded=True):
