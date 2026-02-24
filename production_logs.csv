@@ -1,0 +1,8 @@
+Timestamp,Supervisor,Worker,Job_Code,Activity,Unit,Output,Hours,Notes
+2026-02-24 21:09,Prasanth,Shyam,2KL ANFD_1361,Buffing/Polishing,Square Feet (Sq Ft),0.0,2.5,
+2026-02-24 21:09,Prasanth,Shyam,2KL ANFD_1361,Buffing/Polishing,Square Feet (Sq Ft),0.04,1.5,etetetet
+2026-02-24 21:09,Prasanth,Shyam,2KL ANFD_1361,Welding,Meters (Mts),0.0,1.5,yyyyy
+2026-02-24 21:12,Prasanth,Shyam,2KL ANFD_1361,Buffing/Polishing,Square Feet (Sq Ft),0.02,1.5,eeeete
+2026-02-24 21:55,Prasanth,Shyam,2KL ANFD_1361,Welding,Meters (Mts),0.03,2.0,test
+2026-02-24 21:58,Prasanth,Shyam,2KL ANFD_1361,Drilling,Quantity (Nos),0.02,1.0,ttrete
+2026-02-24 22:12,Prasanth,Shyam,2KL ANFD_1361,Welding,Meters (Mts),0.02,1.0,test
