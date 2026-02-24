@@ -4,12 +4,13 @@ from datetime import datetime
 import pytz
 import os
 
-# --- 1. SETUP & TIMEZONE ---
+# --- 1. SETUP & TIMEZONE (IST) ---
 IST = pytz.timezone('Asia/Kolkata')
 LOGS_FILE = "production_logs.csv"
 WORKERS_FILE = "workers.txt"
 JOBS_FILE = "jobs.txt"
 
+# Exact Units for B&G shopfloor
 ACTIVITY_UNITS = {
     "Welding": "Meters (Mts)", "Grinding": "Amount/Length (Mts)", 
     "Drilling": "Quantity (Nos)", "Cutting (Plasma/Gas)": "Meters (Mts)",
@@ -19,7 +20,7 @@ ACTIVITY_UNITS = {
     "Dispatch/Loading": "Weight (Tons/Kgs)"
 }
 
-# Define the EXACT columns required for B&G Engineering
+# THE PERFECT COLUMN HEADERS
 PERFECT_HEADERS = [
     "Timestamp", "Supervisor", "Worker", "Category", 
     "Job_Code", "Activity", "Output", "Unit", "Hours", "Notes"
@@ -60,29 +61,18 @@ with st.form("prod_form", clear_on_submit=True):
     if st.form_submit_button("Submit Production Log"):
         timestamp = datetime.now(IST).strftime('%Y-%m-%d %H:%M')
         
-        # This matches the PERFECT_HEADERS exactly
         new_entry = {
-            "Timestamp": timestamp,
-            "Supervisor": supervisor,
-            "Worker": selected_worker,
-            "Category": category,
-            "Job_Code": selected_job,
-            "Activity": activity,
-            "Output": output_val,
-            "Unit": unit_label,
-            "Hours": hours,
-            "Notes": notes
+            "Timestamp": timestamp, "Supervisor": supervisor, "Worker": selected_worker,
+            "Category": category, "Job_Code": selected_job, "Activity": activity,
+            "Output": output_val, "Unit": unit_label, "Hours": hours, "Notes": notes
         }
         
         if os.path.exists(LOGS_FILE):
             df = pd.read_csv(LOGS_FILE)
-            # Self-Healing: Fix column mismatches if they exist
-            if "Job" in df.columns and "Job_Code" not in df.columns:
-                df = df.rename(columns={"Job": "Job_Code"})
-            if "Remarks" in df.columns and "Notes" not in df.columns:
-                df = df.rename(columns={"Remarks": "Notes"})
-            
-            df = pd.concat([df, pd.DataFrame([new_entry])], ignore_entry=True)
+            # SELF-HEALING: Rename old mismatched columns if they exist
+            df = df.rename(columns={"Job": "Job_Code", "Remarks": "Notes"})
+            # Fix for Entry 38/39 where some columns were missing
+            df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
         else:
             df = pd.DataFrame([new_entry])
             
@@ -95,19 +85,20 @@ st.divider()
 if os.path.exists(LOGS_FILE):
     df_view = pd.read_csv(LOGS_FILE)
     
-    # Force the display to only show our perfect headers in order
-    display_df = df_view.reindex(columns=PERFECT_HEADERS)
+    # Force alignment to perfect headers
+    df_view = df_view.reindex(columns=PERFECT_HEADERS)
 
     st.subheader("📊 Job Progress Summary")
-    summary = display_df.groupby(['Job_Code', 'Activity', 'Unit']).agg({
-        'Output': 'sum',
-        'Hours': 'sum'
-    })
-    st.table(summary)
+    # Only group if data exists to prevent secondary errors
+    if not df_view.dropna(subset=['Job_Code', 'Activity']).empty:
+        summary = df_view.groupby(['Job_Code', 'Activity', 'Unit']).agg({
+            'Output': 'sum', 'Hours': 'sum'
+        })
+        st.table(summary)
 
     with st.expander("🔍 View All Detailed Logs"):
-        st.dataframe(display_df.sort_values(by="Timestamp", ascending=False), use_container_width=True)
-        csv = display_df.to_csv(index=False).encode('utf-8')
+        st.dataframe(df_view.sort_values(by="Timestamp", ascending=False), use_container_width=True)
+        csv = df_view.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Excel Report", csv, f"BG_Prod_{datetime.now(IST).strftime('%d%m%Y')}.csv")
 else:
     st.info("No records found. Submit your first production log above.")
