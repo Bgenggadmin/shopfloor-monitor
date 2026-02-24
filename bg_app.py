@@ -1,6 +1,23 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import pytz  # This handles the timezone
+import os
+
+# --- TIMEZONE CONFIGURATION ---
+IST = pytz.timezone('Asia/Kolkata')
+
+# Use this line whenever you need the current time
+current_time_ist = datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')
+
+st.title("🏗️ B&G Engineering - Live Monitor")
+
+# Example of how to use it in your form:
+# if st.form_submit_button("Submit"):
+#     timestamp = datetime.now(IST).strftime('%Y-%m-%d %H:%M')
+import streamlit as st
+import pandas as pd
+from datetime import datetime
 import os
 
 # --- 1. SETUP LOCAL STORAGE ---
@@ -99,3 +116,4 @@ if os.path.exists(LOGS_FILE):
     df_view = pd.read_csv(LOGS_FILE)
     st.download_button("📥 DOWNLOAD DATA TO EXCEL", df_view.to_csv(index=False), "bg_prod_data.csv")
     st.dataframe(df_view.sort_values(by="Timestamp", ascending=False), use_container_width=True)
+
