@@ -5,13 +5,12 @@ import pytz
 import os
 from github import Github
 
-# --- 1. SETUP & TIMEZONE ---
+# --- 1. SETUP & TIMEZONE (IST) ---
 IST = pytz.timezone('Asia/Kolkata')
 LOGS_FILE = "production_logs.csv"
 WORKERS_FILE = "workers.txt"
 JOBS_FILE = "jobs.txt"
 
-# Units Mapping
 UNITS = {
     "Welding": "Meters (Mts)", "Grinding": "Amount/Length (Mts)", 
     "Drilling": "Quantity (Nos)", "Cutting (Plasma/Gas)": "Meters (Mts)",
@@ -21,32 +20,25 @@ UNITS = {
     "Dispatch/Loading": "Weight (Tons/Kgs)"
 }
 
-# EXACT HEADERS IN YOUR REQUIRED ORDER
+# THE MASTER HEADERS YOU REQUESTED
 HEADERS = ["Timestamp", "Supervisor", "Worker", "Job_Code", "Activity", "Unit", "Output", "Hours", "Notes"]
 
-# --- 2. GITHUB SYNC FUNCTION ---
+# --- 2. GITHUB SYNC ---
 def sync_to_github(file_path):
     try:
         if "GITHUB_TOKEN" in st.secrets:
-            token = st.secrets["GITHUB_TOKEN"]
-            repo_name = st.secrets["GITHUB_REPO"]
-            g = Github(token)
-            repo = g.get_repo(repo_name)
-            
+            g = Github(st.secrets["GITHUB_TOKEN"])
+            repo = g.get_repo(st.secrets["GITHUB_REPO"])
             with open(file_path, "r") as f:
                 content = f.read()
-            
             try:
-                # Update existing file
                 contents = repo.get_contents(file_path)
-                repo.update_file(contents.path, f"Auto-log {datetime.now(IST)}", content, contents.sha)
+                repo.update_file(contents.path, f"Update {datetime.now(IST)}", content, contents.sha)
             except:
-                # Create file if it doesn't exist on GitHub
                 repo.create_file(file_path, "Initial Create", content)
     except Exception as e:
-        st.error(f"GitHub Sync Error: {e}")
+        st.error(f"Sync Error: {e}")
 
-# Helper for local lists
 def load_list(file_path, defaults):
     if os.path.exists(file_path):
         with open(file_path, "r") as f:
@@ -75,39 +67,42 @@ with st.form("prod_form", clear_on_submit=True):
 
     if st.form_submit_button("Submit Production Log"):
         ts = datetime.now(IST).strftime('%Y-%m-%d %H:%M')
-        new_entry = pd.DataFrame([[ts, supervisor, worker, job_code, activity, unit, output, hours, notes]], columns=HEADERS)
         
+        # Create a clean dictionary for the new entry
+        new_entry = {
+            "Timestamp": ts, "Supervisor": supervisor, "Worker": worker,
+            "Job_Code": job_code, "Activity": activity, "Unit": unit,
+            "Output": output, "Hours": hours, "Notes": notes
+        }
+        
+        # Append logic that avoids InvalidIndexError
         if os.path.exists(LOGS_FILE):
             df = pd.read_csv(LOGS_FILE)
-            # Self-healing for old data
-            if 'Job' in df.columns: df = df.rename(columns={'Job': 'Job_Code'})
-            if 'Remarks' in df.columns: df = df.rename(columns={'Remarks': 'Notes'})
-            df = pd.concat([df, new_entry], ignore_index=True)
+            # Standardize columns before adding new data
+            df = df.rename(columns={'Job': 'Job_Code', 'Remarks': 'Notes'})
+            df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
         else:
-            df = new_entry
+            df = pd.DataFrame([new_entry])
         
+        # Save only the headers we want
+        df = df.reindex(columns=HEADERS)
         df.to_csv(LOGS_FILE, index=False)
-        
-        # PUSH TO GITHUB
         sync_to_github(LOGS_FILE)
-        
         st.success(f"✅ Logged & Synced at {ts}")
         st.rerun()
 
 # --- 4. DATA VIEW ---
 st.divider()
 if os.path.exists(LOGS_FILE):
-    df = pd.read_csv(LOGS_FILE)
-    df = df.reindex(columns=HEADERS)
-    df_display = df.sort_values(by="Timestamp", ascending=False)
+    df_view = pd.read_csv(LOGS_FILE).reindex(columns=HEADERS)
+    df_display = df_view.sort_values(by="Timestamp", ascending=False)
 
     st.subheader("📊 Job Progress Summary")
     st.table(df_display.head(10)) 
 
     with st.expander("🔍 View All Detailed Logs", expanded=True):
         st.dataframe(df_display, use_container_width=True)
-        
-        csv = df.to_csv(index=False).encode('utf-8')
+        csv = df_view.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Excel Report", csv, "BG_Production_Report.csv")
 else:
     st.info("No records found.")
