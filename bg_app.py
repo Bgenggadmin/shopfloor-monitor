@@ -1,15 +1,12 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import base64
-from io import BytesIO
-from PIL import Image
 import os
 
 # --- 1. SETUP LOCAL STORAGE ---
-QUALITY_LOGS = "quality_logs.csv"
-INSPECTORS_FILE = "inspectors.txt"
-JOBS_FILE = "jobs_quality.txt"
+LOGS_FILE = "production_logs.csv"
+WORKERS_FILE = "workers.txt"
+JOBS_FILE = "jobs.txt"
 
 def load_list(file_path, defaults):
     if os.path.exists(file_path):
@@ -22,90 +19,83 @@ def save_list(file_path, data_list):
         for item in data_list:
             f.write(f"{item}\n")
 
-# Load existing lists
-inspectors = load_list(INSPECTORS_FILE, ["Prasanth", "RamaSai", "Subodth", "Naresh"])
+# Load existing data
+workers = load_list(WORKERS_FILE, ["Prasanth", "RamaSai", "Subodth", "Naresh", "Ravindra"])
 job_list = load_list(JOBS_FILE, ["SSR501", "SSR502"])
 
-st.title("✅ B&G Quality Master")
+st.title("🏗️ B&G Shopfloor Monitor")
 
-# --- 2. ADMIN PANEL (Manage Inspectors & Jobs) ---
-with st.expander("⚙️ ADMIN: Add/Remove Inspectors & Job Codes"):
-    tab1, tab2 = st.tabs(["Inspectors", "Job Codes"])
+# --- 2. ADMIN PANEL (Worker & Job Management) ---
+with st.expander("⚙️ ADMIN: Add/Remove Staff & Job Codes"):
+    tabA, tabB = st.tabs(["Workers", "Job Codes"])
     
-    with tab1:
-        new_ins = st.text_input("New Inspector Name")
-        if st.button("➕ Add Inspector"):
-            if new_ins and new_ins not in inspectors:
-                inspectors.append(new_ins)
-                save_list(INSPECTORS_FILE, inspectors)
+    with tabA:
+        new_worker = st.text_input("New Worker Name")
+        if st.button("➕ Add Worker"):
+            if new_worker and new_worker not in workers:
+                workers.append(new_worker)
+                save_list(WORKERS_FILE, workers)
                 st.rerun()
         
-        ins_to_remove = st.selectbox("Remove Inspector", ["-- Select --"] + inspectors)
-        if st.button("🗑️ Delete Inspector"):
-            if ins_to_remove != "-- Select --":
-                inspectors.remove(ins_to_remove)
-                save_list(INSPECTORS_FILE, inspectors)
+        worker_to_remove = st.selectbox("Remove Worker", ["-- Select --"] + workers)
+        if st.button("🗑️ Delete Worker"):
+            if worker_to_remove != "-- Select --":
+                workers.remove(worker_to_remove)
+                save_list(WORKERS_FILE, workers)
                 st.rerun()
 
-    with tab2:
-        new_job = st.text_input("New Quality Job Code")
-        if st.button("➕ Add Quality Job"):
+    with tabB:
+        new_job = st.text_input("New Job Code")
+        if st.button("➕ Add Job"):
             if new_job and new_job not in job_list:
                 job_list.append(new_job)
                 save_list(JOBS_FILE, job_list)
                 st.rerun()
         
-        job_to_remove = st.selectbox("Remove Quality Job", ["-- Select --"] + job_list)
-        if st.button("🗑️ Delete Quality Job"):
+        job_to_remove = st.selectbox("Remove Job", ["-- Select --"] + job_list)
+        if st.button("🗑️ Delete Job"):
             if job_to_remove != "-- Select --":
                 job_list.remove(job_to_remove)
                 save_list(JOBS_FILE, job_list)
                 st.rerun()
 
-# --- 3. INSPECTION FORM (With Camera & Notes) ---
+# --- 3. DAILY PRODUCTION ENTRY (Restored Notes Section) ---
 st.divider()
-with st.form("quality_form", clear_on_submit=True):
+with st.form("prod_form", clear_on_submit=True):
     col1, col2 = st.columns(2)
     with col1:
-        sel_inspector = st.selectbox("Inspector", inspectors)
-        sel_job = st.selectbox("Job Code", job_list)
-        stage = st.selectbox("Stage", ["Marking", "Fitup", "PMI", "Hydro", "Final"])
+        supervisor = st.selectbox("Supervisor", ["Prasanth", "RamaSai", "Subodth"])
+        selected_worker = st.selectbox("Worker", workers)
+        selected_job = st.selectbox("Job Code", job_list)
     with col2:
-        status = st.radio("Status", ["🟢 Passed", "🔴 Rework"])
-        notes = st.text_area("📋 Technical Notes / Observations")
-
-    photo = st.camera_input("Take Shopfloor Photo")
+        hours = st.number_input("Man-Hours Worked", min_value=0.0, step=0.5)
+        activity = st.selectbox("Activity", ["Welding", "Fitup", "Grinding", "Marking", "PMI", "Hydrotest"])
+        # RESTORED NOTES SECTION
+        notes = st.text_area("📋 Technical Notes / Remarks", placeholder="Enter specific observations here...")
     
-    if st.form_submit_button("Submit Quality Record"):
-        img_str = "No Photo"
-        if photo:
-            img = Image.open(photo)
-            buffered = BytesIO()
-            img.save(buffered, format="JPEG")
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-
-        new_entry = pd.DataFrame([{
+    if st.form_submit_button("Submit Production Log"):
+        new_row = pd.DataFrame([{
             "Timestamp": datetime.now().strftime('%Y-%m-%d %H:%M'),
-            "Inspector": sel_inspector,
-            "Job_Code": sel_job,
-            "Stage": stage,
-            "Status": status,
-            "Notes": notes,
-            "Photo": img_str
+            "Supervisor": supervisor,
+            "Worker": selected_worker,
+            "Job_Code": selected_job,
+            "Hours": hours,
+            "Activity": activity,
+            "Notes": notes  # Saving the notes
         }])
         
-        if os.path.exists(QUALITY_LOGS):
-            df = pd.read_csv(QUALITY_LOGS)
-            df = pd.concat([df, new_entry], ignore_index=True)
+        if os.path.exists(LOGS_FILE):
+            df = pd.read_csv(LOGS_FILE)
+            df = pd.concat([df, new_row], ignore_index=True)
         else:
-            df = new_entry
-        df.to_csv(QUALITY_LOGS, index=False)
-        st.success(f"Inspection for {sel_job} saved!")
+            df = new_row
+        df.to_csv(LOGS_FILE, index=False)
+        st.success(f"Log saved for {selected_worker} on {selected_job}")
         st.balloons()
 
-# --- 4. VIEW & EXPORT ---
+# --- 4. DATA EXPORT & VIEW ---
 st.divider()
-if os.path.exists(QUALITY_LOGS):
-    df_view = pd.read_csv(QUALITY_LOGS)
-    st.download_button("📥 DOWNLOAD QUALITY DATA", df_view.to_csv(index=False), "bg_quality_data.csv")
-    st.dataframe(df_view.drop(columns=["Photo"]).sort_values(by="Timestamp", ascending=False))
+if os.path.exists(LOGS_FILE):
+    df_view = pd.read_csv(LOGS_FILE)
+    st.download_button("📥 DOWNLOAD DATA TO EXCEL", df_view.to_csv(index=False), "bg_prod_data.csv")
+    st.dataframe(df_view.sort_values(by="Timestamp", ascending=False), use_container_width=True)
