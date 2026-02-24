@@ -20,8 +20,8 @@ UNITS = {
     "Dispatch/Loading": "Weight (Tons/Kgs)"
 }
 
-# FIXED HEADERS FOR BOTH TABLES
-HEADERS = ["Timestamp", "Supervisor", "Worker", "Job_Code", "Activity", "Output", "Unit", "Hours", "Category", "Notes"]
+# EXACT HEADERS IN YOUR REQUIRED ORDER
+HEADERS = ["Timestamp", "Supervisor", "Worker", "Job_Code", "Activity", "Unit", "Output", "Hours", "Notes"]
 
 def load_list(file_path, defaults):
     if os.path.exists(file_path):
@@ -41,46 +41,47 @@ with st.form("prod_form", clear_on_submit=True):
     with col1:
         supervisor = st.selectbox("Supervisor", ["Prasanth", "RamaSai", "Subodth"])
         worker = st.selectbox("Worker Name", workers)
-        category = st.selectbox("Worker Category", ["Welder (Grade A/IBR)", "Welder (Grade B)", "Fitter", "Grinder", "Helper"])
         job_code = st.selectbox("Job Code", job_list)
     with col2:
         activity = st.selectbox("Activity", list(UNITS.keys()))
         unit = UNITS[activity]
         output = st.number_input(f"Output ({unit})", min_value=0.0)
-        hours = st.number_input("Man-Hours", min_value=0.0, step=0.5)
-        notes = st.text_area("Remarks")
+        hours = st.number_input("Man-Hours Spent", min_value=0.0, step=0.5)
+        notes = st.text_area("Remarks/Notes")
 
     if st.form_submit_button("Submit Production Log"):
         ts = datetime.now(IST).strftime('%Y-%m-%d %H:%M')
-        new_data = pd.DataFrame([[ts, supervisor, worker, job_code, activity, output, unit, hours, category, notes]], columns=HEADERS)
+        # Create new entry with EXACT headers
+        new_entry = pd.DataFrame([[ts, supervisor, worker, job_code, activity, unit, output, hours, notes]], columns=HEADERS)
         
         if os.path.exists(LOGS_FILE):
             df = pd.read_csv(LOGS_FILE)
-            # FORCE REPAIR: Rename any old columns to match HEADERS
-            df = df.rename(columns={"Job": "Job_Code", "Remarks": "Notes", "Job_code": "Job_Code"})
-            df = pd.concat([df, new_data], ignore_index=True)
+            # Automatic Fix: Move old data from "Job" or "Remarks" to our new headers
+            if 'Job' in df.columns: df['Job_Code'] = df['Job_Code'].fillna(df['Job'])
+            if 'Remarks' in df.columns: df['Notes'] = df['Notes'].fillna(df['Remarks'])
+            df = pd.concat([df, new_entry], ignore_index=True)
         else:
-            df = new_data
+            df = new_entry
         
         df.to_csv(LOGS_FILE, index=False)
-        st.success("✅ Logged Successfully!")
+        st.success(f"✅ Logged at {ts}")
         st.rerun()
 
-# --- 3. DATA TABLES ---
+# --- 3. DATA VIEW (Both tables in your required format) ---
 st.divider()
 if os.path.exists(LOGS_FILE):
     df = pd.read_csv(LOGS_FILE)
-    # Ensure all required columns exist in the display
+    # Force all columns to appear in your exact order
     df = df.reindex(columns=HEADERS)
-    
-    # TABLE 1: JOB PROGRESS SUMMARY
-    st.subheader("📊 Job Progress Summary")
-    summary = df.groupby(['Job_Code', 'Activity', 'Unit']).agg({'Output': 'sum', 'Hours': 'sum'}).reset_index()
-    st.table(summary)
+    # Sort so newest is on top
+    df_display = df.sort_values(by="Timestamp", ascending=False)
 
-    # TABLE 2: VIEW ALL DETAILED LOGS
+    st.subheader("📊 Job Progress Summary")
+    # Showing the full list as a summary (No grouping)
+    st.table(df_display.head(10)) 
+
     with st.expander("🔍 View All Detailed Logs", expanded=True):
-        st.dataframe(df.sort_values(by="Timestamp", ascending=False), use_container_width=True)
+        st.dataframe(df_display, use_container_width=True)
         
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Excel Report", csv, "BG_Production_Report.csv")
