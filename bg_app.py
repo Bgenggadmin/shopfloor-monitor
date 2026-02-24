@@ -3,66 +3,88 @@ import pandas as pd
 from datetime import datetime
 import os
 
-# --- 1. LOCAL STORAGE SETUP ---
-DB_FILE = "production_logs.csv"
+# --- 1. SETUP LOCAL STORAGE ---
+LOGS_FILE = "production_logs.csv"
+WORKERS_FILE = "workers.txt"
+JOBS_FILE = "jobs.txt"
 
-# Check for existing data
-if os.path.exists(DB_FILE):
-    df = pd.read_csv(DB_FILE)
-else:
-    df = pd.DataFrame(columns=["Timestamp", "Supervisor", "Worker", "Job_Code", "Hours", "Activity", "Status"])
+def load_list(file_path, defaults):
+    if os.path.exists(file_path):
+        with open(file_path, "r") as f:
+            return [line.strip() for line in f.readlines() if line.strip()]
+    return defaults
 
-st.title("🏭 B&G Production Log")
+def save_list(file_path, data_list):
+    with open(file_path, "w") as f:
+        for item in data_list:
+            f.write(f"{item}\n")
 
-# --- 2. DATA BACKUP SECTION ---
-# Use this to save to your local PC before updating GitHub code
-with st.sidebar:
-    st.header("💾 Backend Control")
-    if not df.empty:
-        csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 DOWNLOAD TO EXCEL",
-            data=csv,
-            file_name=f"BG_Prod_Backup_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-        if st.button("🗑️ Clear Backend Memory"):
-            if os.path.exists(DB_FILE):
-                os.remove(DB_FILE)
-                st.rerun()
-    else:
-        st.info("No logs saved yet.")
+# Load existing data
+workers = load_list(WORKERS_FILE, ["Prasanth", "RamaSai", "Subodth"])
+job_list = load_list(JOBS_FILE, ["SSR501", "SSR502"])
 
-# --- 3. ENTRY FORM ---
+st.title("🏗️ B&G Shopfloor Monitor")
+
+# --- 2. ADMIN PANEL (The "New" Features) ---
+with st.expander("⚙️ ADMIN: Manage Staff & Job Codes"):
+    st.subheader("Manage Workers")
+    new_worker = st.text_input("Add New Worker Name")
+    if st.button("➕ Add Worker"):
+        if new_worker and new_worker not in workers:
+            workers.append(new_worker)
+            save_list(WORKERS_FILE, workers)
+            st.rerun()
+
+    worker_to_remove = st.selectbox("Remove Worker", ["-- Select --"] + workers)
+    if st.button("🗑️ Delete Worker"):
+        if worker_to_remove != "-- Select --":
+            workers.remove(worker_to_remove)
+            save_list(WORKERS_FILE, workers)
+            st.rerun()
+
+    st.divider()
+    st.subheader("Manage Job Codes")
+    new_job = st.text_input("Add New Job Code (e.g. VESSEL-202)")
+    if st.button("➕ Add Job"):
+        if new_job and new_job not in job_list:
+            job_list.append(new_job)
+            save_list(JOBS_FILE, job_list)
+            st.rerun()
+
+# --- 3. DAILY PRODUCTION ENTRY ---
+st.divider()
 with st.form("prod_form", clear_on_submit=True):
     col1, col2 = st.columns(2)
     with col1:
         supervisor = st.selectbox("Supervisor", ["Prasanth", "RamaSai", "Subodth"])
-        worker = st.text_input("Worker Name")
-        job = st.text_input("Job Code (e.g. SSR501)")
+        selected_worker = st.selectbox("Worker", workers)
+        selected_job = st.selectbox("Job Code", job_list)
     with col2:
-        hours = st.number_input("Hours Worked", min_value=0.0, step=0.5)
+        hours = st.number_input("Man-Hours Worked", min_value=0.0, step=0.5)
         activity = st.selectbox("Activity", ["Welding", "Fitup", "Grinding", "Marking"])
-        status = st.radio("Status", ["In Progress", "Completed"])
-
-    if st.form_submit_button("Submit to Backend"):
+    
+    if st.form_submit_button("Submit Production Log"):
         new_row = pd.DataFrame([{
             "Timestamp": datetime.now().strftime('%Y-%m-%d %H:%M'),
             "Supervisor": supervisor,
-            "Worker": worker,
-            "Job_Code": job,
+            "Worker": selected_worker,
+            "Job_Code": selected_job,
             "Hours": hours,
-            "Activity": activity,
-            "Status": status
+            "Activity": activity
         }])
         
-        df = pd.concat([df, new_row], ignore_index=True)
-        df.to_csv(DB_FILE, index=False)
-        st.success(f"Log for {worker} saved locally!")
-        st.balloons()
+        # Save logs to file
+        if os.path.exists(LOGS_FILE):
+            df = pd.read_csv(LOGS_FILE)
+            df = pd.concat([df, new_row], ignore_index=True)
+        else:
+            df = new_row
+        df.to_csv(LOGS_FILE, index=False)
+        st.success(f"Log saved for {selected_worker}")
 
-# --- 4. VIEW TABLE ---
+# --- 4. DATA EXPORT ---
 st.divider()
-st.subheader("📊 Recent Logs")
-st.dataframe(df.sort_values(by="Timestamp", ascending=False), use_container_width=True)
+if os.path.exists(LOGS_FILE):
+    df_view = pd.read_csv(LOGS_FILE)
+    st.download_button("📥 DOWNLOAD DATA TO EXCEL", df_view.to_csv(index=False), "bg_prod_data.csv")
+    st.dataframe(df_view.sort_values(by="Timestamp", ascending=False))
