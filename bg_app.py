@@ -20,7 +20,6 @@ UNITS = {
     "Dispatch/Loading": "Weight (Tons/Kgs)"
 }
 
-# THE HEADERS YOU REQUESTED FOR ALL VIEWS
 HEADERS = ["Timestamp", "Supervisor", "Worker", "Job_Code", "Activity", "Unit", "Output", "Hours", "Notes"]
 
 # --- 2. GITHUB SYNC ---
@@ -51,65 +50,50 @@ st.title("🏗️ B&G Production & Progress Tracker")
 workers = load_list(WORKERS_FILE, ["Prasanth", "RamaSai", "Subodth", "Naresh", "Ravindra"])
 job_list = load_list(JOBS_FILE, ["SSR501", "SSR502", "VESSEL-101"])
 
-# --- 3. ENTRY FORM ---
-with st.form("prod_form", clear_on_submit=True):
-    col1, col2 = st.columns(2)
-    with col1:
-        supervisor = st.selectbox("Supervisor", ["Prasanth", "RamaSai", "Subodth"])
-        worker = st.selectbox("Worker Name", workers)
-        job_code = st.selectbox("Job Code", job_list)
-    with col2:
-        activity = st.selectbox("Activity", list(UNITS.keys()))
-        unit = UNITS[activity]
-        output = st.number_input(f"Output ({unit})", min_value=0.0)
-        hours = st.number_input("Man-Hours Spent", min_value=0.0, step=0.5)
-        notes = st.text_area("Remarks/Notes")
+# --- 3. ENTRY FORM (FIXED LIVE UNIT UPDATING) ---
+# Use columns OUTSIDE the form for the live-updating dropdowns
+col1, col2 = st.columns(2)
+with col1:
+    supervisor = st.selectbox("Supervisor", ["Prasanth", "RamaSai", "Subodth"])
+    worker = st.selectbox("Worker Name", workers)
+    job_code = st.selectbox("Job Code", job_list)
+with col2:
+    # This selection now triggers an immediate change in unit_label
+    activity = st.selectbox("Activity", list(UNITS.keys()))
+    unit_label = UNITS[activity] # <--- THIS NOW UPDATES INSTANTLY
+    output = st.number_input(f"Output ({unit_label})", min_value=0.0)
+    hours = st.number_input("Man-Hours Spent", min_value=0.0, step=0.5)
+    notes = st.text_area("Remarks/Notes")
 
-    if st.form_submit_button("Submit Production Log"):
-        ts = datetime.now(IST).strftime('%Y-%m-%d %H:%M')
-        
-        # 1. Create the new row as a clean DataFrame
-        new_df = pd.DataFrame([[ts, supervisor, worker, job_code, activity, unit, output, hours, notes]], columns=HEADERS)
-        
-        # 2. Load and Sanitize existing data
-        if os.path.exists(LOGS_FILE):
-            try:
-                df = pd.read_csv(LOGS_FILE)
-                # Remove any duplicate columns that cause InvalidIndexError
-                df = df.loc[:, ~df.columns.duplicated()]
-                # Standardize names
-                df = df.rename(columns={'Job': 'Job_Code', 'Remarks': 'Notes'})
-                # Force only the required headers
-                df = df.reindex(columns=HEADERS)
-                # Append the new row
-                df = pd.concat([df, new_df], ignore_index=True)
-            except:
-                # If the file is too corrupted to read, start fresh
-                df = new_df
-        else:
-            df = new_df
-        
-        # 3. Final Save and Sync
-        df.to_csv(LOGS_FILE, index=False)
-        sync_to_github(LOGS_FILE)
-        st.success(f"✅ Logged & Synced at {ts}")
-        st.rerun()
+if st.button("🚀 Submit Production Log"):
+    ts = datetime.now(IST).strftime('%Y-%m-%d %H:%M')
+    new_row = [ts, supervisor, worker, job_code, activity, unit_label, output, hours, notes]
+    
+    if os.path.exists(LOGS_FILE):
+        try:
+            df = pd.read_csv(LOGS_FILE)
+            df = df.loc[:, ~df.columns.duplicated()]
+            df = df.rename(columns={'Job': 'Job_Code', 'Remarks': 'Notes'})
+            new_df = pd.DataFrame([new_row], columns=HEADERS)
+            df = pd.concat([df[HEADERS], new_df], ignore_index=True)
+        except:
+            df = pd.DataFrame([new_row], columns=HEADERS)
+    else:
+        df = pd.DataFrame([new_row], columns=HEADERS)
+    
+    df.to_csv(LOGS_FILE, index=False)
+    sync_to_github(LOGS_FILE)
+    st.success(f"✅ Logged & Synced at {ts}")
+    st.rerun()
 
-# --- 4. DISPLAY (Identical Formats) ---
+# --- 4. DISPLAY ---
 st.divider()
 if os.path.exists(LOGS_FILE):
-    # Always force the HEADERS order on display
-    df_view = pd.read_csv(LOGS_FILE)
-    df_view = df_view.loc[:, ~df_view.columns.duplicated()]
-    df_view = df_view.reindex(columns=HEADERS)
+    df_view = pd.read_csv(LOGS_FILE).reindex(columns=HEADERS)
     df_display = df_view.sort_values(by="Timestamp", ascending=False)
-
     st.subheader("📊 Job Progress Summary")
     st.table(df_display.head(10)) 
-
     with st.expander("🔍 View All Detailed Logs", expanded=True):
         st.dataframe(df_display, use_container_width=True)
         csv = df_view.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Excel Report", csv, "BG_Production_Report.csv")
-else:
-    st.info("No records found.")
