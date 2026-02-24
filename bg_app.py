@@ -1,116 +1,70 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
-import os
 
-# --- 1. DATA FILES ---
-WORKER_FILE = "bg_workers.txt"
-JOB_FILE = "bg_jobs.txt"
-LOG_FILE = "bg_production_log_v14.csv"
+# 1. Establish Backend Connection
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Initialization
-for file, default in [(WORKER_FILE, "Suresh,Ramesh"), (JOB_FILE, "JOB-101,DIST-05")]:
-    if not os.path.exists(file):
-        with open(file, "w") as f: f.write(default)
-
-def get_list(filepath):
-    with open(filepath, "r") as f:
-        return [item.strip() for item in f.read().split(",") if item.strip()]
-
-# --- 2. SECURITY ---
-if "authenticated" not in st.session_state:
-    st.session_state["authenticated"] = False
-
-if not st.session_state["authenticated"]:
-    st.title("🔐 B&G Secure Access")
-    pwd = st.text_input("Enter Password", type="password")
-    if st.button("Log In"):
-        if pwd == "BG2026": #
-            st.session_state["authenticated"] = True
-            st.rerun()
-        else: st.error("Invalid Password")
-    st.stop()
-
-# --- 3. MAIN INTERFACE ---
 st.title("🏗️ B&G Engineering Industries")
-tabs = st.tabs(["📝 Daily Entry", "📊 Analytics Dashboard", "⚙️ Admin Tools"])
+st.subheader("Shopfloor Production Log")
 
-# --- TAB 1: DAILY ENTRY ---
-with tabs[0]:
-    st.subheader("Shopfloor Production Log")
-    
-    # Prasanth, RamaSai, Subodth, Naresh, Ravindra are now added as loggers
-    supervisors = ["Prasanth", "RamaSai", "Subodth", "Naresh", "Ravindra"]
-    
-    activity_map = {
-        "Welder": ["Meters Weld"],
-        "Fitter": ["Shell to Shell", "Top Dish Nozzle Fitup", "Rolling", "Marking", "Assembly"],
-        "Buffer": ["Rough Polish", "Matt Finish", "Mirror Polish"],
-        "Grinder": ["Grinding Work"],
-        "Turner": ["Flange Machining", "Shaft Machining"],
-        "Cutting": ["Plasma Cutting", "Gas Cutting"],
-        "Driller": ["Hole Drilling"],
-        "Other": ["Hydrotest", "Trial Run", "Pickling/Passivation"]
-    }
-    
-    c1, c2 = st.columns(2)
-    with c1:
-        logged_by = st.selectbox("Logged By (Supervisor)", supervisors) # New field
+# 2. Daily Entry Form
+with st.form("production_form", clear_on_submit=True):
+    col1, col2 = st.columns(2)
+    with col1:
+        supervisor = st.selectbox("Logged By (Supervisor)", ["Prasanth", "RamaSai", "Subodth"])
         unit = st.selectbox("Unit", ["A", "B", "C"])
-        worker = st.selectbox("Worker", get_list(WORKER_FILE))
-        job = st.selectbox("Job Code", get_list(JOB_FILE))
-    with c2:
-        cat = st.selectbox("Category", list(activity_map.keys()))
-        act = st.selectbox("Activity", activity_map[cat])
-        hrs = st.number_input("Man-Hours Spent", min_value=0.0, step=0.5)
+        worker = st.selectbox("Worker", ["Suresh", "Naresh", "Ravindra"])
+        job_code = st.selectbox("Job Code", ["JOB-101", "SSR501", "SSR502"])
     
-    out = st.number_input("Output Value (Meters/Qty)", min_value=0.0)
-    rem = st.text_input("Remarks")
+    with col2:
+        category = st.selectbox("Category", ["Welder", "Fitter", "Helper"])
+        activity = st.selectbox("Activity", ["Meters Weld", "Fitup", "Grinding"])
+        hours = st.number_input("Man-Hours Spent", min_value=0.0, step=0.5)
+        output = st.number_input("Output Value (Meters/Qty)", min_value=0.0, step=0.1)
 
-    if st.button("Submit to Backend"):
-        now = datetime.now()
-        row = f"{now.strftime('%Y-%m-%d')},{now.strftime('%H:%M')},{logged_by},{unit},{worker},{job},{cat},{act},{hrs},{out},{rem}\n"
-        with open(LOG_FILE, "a") as f: f.write(row)
-        st.success(f"Entry Saved by {logged_by}!")
+    remarks = st.text_input("Remarks")
+    
+    submit = st.form_submit_button("Submit to Backend")
 
-# --- TAB 2: ANALYTICS ---
-with tabs[1]:
-    st.subheader("Business Performance Summaries")
-    if os.path.exists(LOG_FILE):
-        df = pd.read_csv(LOG_FILE, names=["Date","Time","Supervisor","Unit","Worker","Job","Category","Activity","Hours","Output","Remarks"])
-        df['Date'] = pd.to_datetime(df['Date'])
-        
-        col_x, col_y = st.columns(2)
-        with col_x:
-            st.write("### 👥 Worker-wise Hours")
-            st.bar_chart(df.groupby("Worker")["Hours"].sum())
-        with col_y:
-            st.write("### 📁 Job-wise Hours")
-            st.bar_chart(df.groupby("Job")["Hours"].sum())
+    if submit:
+        try:
+            # Prepare data row
+            new_row = pd.DataFrame([{
+                "Timestamp": datetime.now().strftime('%Y-%m-%d %H:%M'),
+                "Supervisor": supervisor,
+                "Unit": unit,
+                "Worker": worker,
+                "Job_Code": job_code,
+                "Category": category,
+                "Activity": activity,
+                "Hours": hours,
+                "Output": output,
+                "Remarks": remarks
+            }])
+
+            # Read current data from the Production_Logs tab
+            existing_df = conn.read(worksheet="Production_Logs")
             
-        st.write("### 👤 Entry-wise Loggers (Who logged how much)")
-        st.bar_chart(df.groupby("Supervisor")["Hours"].count()) # Count of entries per supervisor
-        
-        with st.expander("View Detailed Raw Logs"):
-            st.dataframe(df)
-    else:
-        st.info("No data logged yet.")
+            # Combine and Update
+            updated_df = pd.concat([existing_df, new_row], ignore_index=True)
+            conn.update(worksheet="Production_Logs", data=updated_df)
+            
+            st.balloons()
+            st.success("✅ Log successfully saved to Google Sheets backend!")
+        except Exception as e:
+            st.error(f"❌ Backend Error: {e}")
+            st.info("Check if the Sheet is shared with the bg-logger email as Editor.")
 
-# --- TAB 3: ADMIN TOOLS ---
-with tabs[2]:
-    st.subheader("Manage Staff & Project Codes")
-    colA, colB = st.columns(2)
-    with colA:
-        st.write("**Worker Management**")
-        new_w = st.text_input("Add Worker Name")
-        if st.button("Add Worker"):
-            if new_w:
-                with open(WORKER_FILE, "a") as f: f.write(f",{new_w}")
-                st.rerun()
-    with colB:
-        st.write("**Job Management**")
-        new_j = st.text_input("Add Job Code")
-        if st.button("Create Job"):
-            if new_j:
-                with open(JOB_FILE, "a") as f: f.write(f",{new_j}")
-                st.rerun()
+# 3. Simple View for Local Saving
+if st.checkbox("View Backend Records"):
+    try:
+        df = conn.read(worksheet="Production_Logs", ttl="0")
+        st.dataframe(df.sort_values(by="Timestamp", ascending=False))
+        
+        # Simple Download button to save to your local system before code changes
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Download Records to Excel/CSV", data=csv, file_name="bg_production_logs.csv", mime="text/csv")
+    except:
+        st.write("No records in backend yet.")
