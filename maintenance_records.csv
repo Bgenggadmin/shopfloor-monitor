@@ -3,4 +3,5 @@ Timestamp,Technician,Machine_ID,Type,Issue_Status,Action_Taken,Photo_Path
 2026-02-24 21:45,Naresh,Plasma-01,Breakdown (Unplanned),🟢 Running,Tyy,maintenance_photos/MAINT_24022026_214536.png
 2026-02-24 21:46,Ravindra,Plasma-01,Breakdown (Unplanned),🟢 Running,Done,maintenance_photos/MAINT_24022026_214635.png
 2026-02-24 21:46,Ravindra,Plasma-01,Breakdown (Unplanned),🟢 Running,Done,maintenance_photos/MAINT_24022026_214638.png
-2026-02-25 10:24,Brahmiah,Plasma-01,Breakdown (Unplanned),🟡 Under Observation,tetetete,None
+2026-02-25 10:24,Brahmiah,Plasma-01,Breakdown (Unplanned),🟡 Under Observation,tetetete,
+2026-02-25 10:28,Brahmiah,Welding-Machine-05,Preventive (PM),🟡 Under Observation,mnmvbmbv,None
