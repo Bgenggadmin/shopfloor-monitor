@@ -36,17 +36,16 @@ def save_to_github(dataframe):
 if os.path.exists(DB_FILE):
     df = pd.read_csv(DB_FILE)
 else:
-    df = pd.DataFrame(columns=["Timestamp", "Supervisor", "Worker", "Job_Code", "Heat_No", "Activity", "Unit", "Output", "Hours", "Notes"])
+    # Exact 9 columns as per your logs
+    df = pd.DataFrame(columns=["Timestamp", "Supervisor", "Worker", "Job_Code", "Activity", "Unit", "Output", "Hours", "Notes"])
 
 # --- 3. DYNAMIC LIST LOGIC ---
 def get_list(column_name, default_list):
     if not df.empty and column_name in df.columns:
         found_items = df[column_name].dropna().unique().tolist()
-        # Merge default items with what is in the CSV
         return sorted(list(set(default_list + [str(x) for x in found_items if str(x).strip() != ""])))
     return sorted(default_list)
 
-# Load current lists
 supervisors = get_list("Supervisor", ["RamaSai", "Ravindra", "Subodth", "Prasanth"])
 workers = get_list("Worker", [])
 jobs = get_list("Job_Code", [])
@@ -69,11 +68,10 @@ with st.form("production_form", clear_on_submit=True):
         job_code = st.text_input("New Job Code").upper() if j_sel == "➕ Add New" else j_sel
 
     with col2:
-        # ACTIVITY (Now Dynamic)
+        # ACTIVITY
         a_sel = st.selectbox("Activity", ["-- Select Activity --", "➕ Add New Activity"] + activities)
         activity = st.text_input("New Activity Name") if a_sel == "➕ Add New Activity" else a_sel
         
-        heat_no = st.text_input("Heat No / Plate No").upper()
         unit = st.selectbox("Unit", ["Meters (Mts)", "Components (Nos)", "Layouts (Nos)", "Joints/Points (Nos)", "Amount/Length (Mts)"])
         output = st.number_input("Output Value", min_value=0.0, step=0.1)
         hours = st.number_input("Hours Spent", min_value=0.0, step=0.5)
@@ -81,25 +79,25 @@ with st.form("production_form", clear_on_submit=True):
     notes = st.text_area("Activity Details / Consumables Used")
 
     if st.form_submit_button("🚀 Log Production & Sync"):
-        # Validation
         invalid_selections = ["-- Select Supervisor --", "-- Select Worker --", "-- Select Job --", "-- Select Activity --", "", None]
         if any(v in invalid_selections for v in [supervisor, worker, job_code, activity]):
-            st.error("❌ Please fill in all fields (Supervisor, Worker, Job, and Activity).")
+            st.error("❌ Error: Supervisor, Worker, Job, and Activity are required.")
         else:
             new_row = pd.DataFrame([{
                 "Timestamp": datetime.now(IST).strftime('%Y-%m-%d %H:%M'),
                 "Supervisor": supervisor, "Worker": worker, "Job_Code": job_code,
-                "Heat_No": heat_no, "Activity": activity, "Unit": unit, 
-                "Output": output, "Hours": hours, "Notes": notes
+                "Activity": activity, "Unit": unit, "Output": output, 
+                "Hours": hours, "Notes": notes
             }])
             df = pd.concat([df, new_row], ignore_index=True)
             df.to_csv(DB_FILE, index=False)
             if save_to_github(df):
-                st.success(f"✅ Success! {activity} for {job_code} saved.")
+                st.success(f"✅ Success! {job_code} Logged.")
                 st.rerun()
 
 # --- 5. HISTORY ---
 st.divider()
 st.subheader("📋 Recent Production Logs")
 if not df.empty:
+    # Shows the exact columns you want
     st.dataframe(df.sort_values(by="Timestamp", ascending=False).head(20), use_container_width=True)
