@@ -97,24 +97,28 @@ if os.path.exists(LOGS_FILE):
         st.dataframe(df_display, use_container_width=True)
         csv = df_view.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Excel Report", csv, "BG_Production_Report.csv")
-        # --- 5. MANAGEMENT & SUMMARY (PHASE 2) ---
+        # --- 5. MANAGEMENT & SUMMARY (FIXED) ---
 st.divider()
 st.header("📊 Management & Production Summary")
 
 if os.path.exists(LOGS_FILE):
-    # Reload data for fresh view
     df_mngt = pd.read_csv(LOGS_FILE)
+    # Convert Timestamp to actual date for filtering
+    df_mngt['Date'] = pd.to_datetime(df_mngt['Timestamp']).dt.date
     
-    # A. SEARCH & FILTER
-    st.subheader("🔍 Search Records")
-    col_s1, col_s2 = st.columns(2)
-    with col_s1:
-        search_job = st.multiselect("Filter by Job Code", options=df_mngt['Job_Code'].unique())
-    with col_s2:
+    # A. DATE, JOB, & WORKER FILTERS
+    st.subheader("🔍 Advanced Search")
+    col_f1, col_f2, col_f3 = st.columns(3)
+    with col_f1:
+        date_range = st.date_input("Filter by Date", value=[df_mngt['Date'].min(), df_mngt['Date'].max()])
+    with col_f2:
+        search_job = st.multiselect("Filter by Job", options=df_mngt['Job_Code'].unique())
+    with col_f3:
         search_worker = st.multiselect("Filter by Worker", options=df_mngt['Worker'].unique())
 
-    # Apply Filters
-    filtered_df = df_mngt.copy()
+    # Apply all filters
+    mask = (df_mngt['Date'] >= date_range[0]) & (df_mngt['Date'] <= date_range[1])
+    filtered_df = df_mngt[mask]
     if search_job:
         filtered_df = filtered_df[filtered_df['Job_Code'].isin(search_job)]
     if search_worker:
@@ -122,39 +126,32 @@ if os.path.exists(LOGS_FILE):
 
     st.dataframe(filtered_df.sort_values(by="Timestamp", ascending=False), use_container_width=True)
 
-    # B. DELETE ACCIDENTAL ENTRIES
-    st.subheader("🗑️ Delete Incorrect Entry")
-    with st.expander("Click here to remove a record"):
-        if not filtered_df.empty:
-            # Create a unique list of rows to delete
-            delete_options = filtered_df['Timestamp'] + " | " + filtered_df['Job_Code'] + " | " + filtered_df['Activity']
-            to_delete = st.selectbox("Select the exact record to delete", delete_options)
-            
-            if st.button("❌ Confirm Delete Forever"):
-                # Remove the selected row from the main dataframe
-                # We split back the string to find the exact match
-                ts_del, job_del, act_del = to_delete.split(" | ")
-                df_mngt = df_mngt[~((df_mngt['Timestamp'] == ts_del) & 
-                                    (df_mngt['Job_Code'] == job_del) & 
-                                    (df_mngt['Activity'] == act_del))]
-                
-                # Save & Sync
-                df_mngt.to_csv(LOGS_FILE, index=False)
-                sync_to_github(LOGS_FILE)
-                st.error(f"Record for {job_del} deleted and synced.")
-                st.rerun()
-
-    # C. TOTAL PRODUCTION SUMMARIES
+    # B. TOTAL PRODUCTION SUMMARIES (KEYERROR FIXED)
     st.subheader("📈 Production Totals")
-    summary_type = st.radio("View Totals By:", ["Job Code", "Worker", "Activity"], horizontal=True)
     
-    # Calculate Sums
-    summary_df = df_mngt.groupby(summary_type).agg({'Output': 'sum', 'Hours': 'sum'}).reset_index()
-    st.table(summary_df)
+    # Mapping friendly names to exact CSV column names
+    choice_map = {"Job Code": "Job_Code", "Worker": "Worker", "Activity": "Activity"}
+    summary_choice = st.radio("Sum up totals by:", list(choice_map.keys()), horizontal=True)
+    actual_col = choice_map[summary_choice]
+    
+    # Calculate Sums on filtered data
+    if not filtered_df.empty:
+        summary_table = filtered_df.groupby(actual_col).agg({'Output': 'sum', 'Hours': 'sum'}).reset_index()
+        st.table(summary_table)
 
+    # C. DELETE INCORRECT ENTRY
+    st.subheader("🗑️ Data Cleanup")
+    with st.expander("Delete an accidental entry"):
+        delete_options = filtered_df['Timestamp'] + " | " + filtered_df['Worker'] + " | " + filtered_df['Job_Code']
+        to_delete = st.selectbox("Select record to remove", delete_options)
+        if st.button("❌ Permanent Delete"):
+            ts_del, _, job_del = to_delete.split(" | ")
+            df_final = df_mngt[~((df_mngt['Timestamp'] == ts_del) & (df_mngt['Job_Code'] == job_del))]
+            df_final.drop(columns=['Date']).to_csv(LOGS_FILE, index=False) # Remove temp Date column before saving
+            sync_to_github(LOGS_FILE)
+            st.error("Entry deleted. Refreshing...")
+            st.rerun()
 else:
-    st.info("Start logging data to see summaries.")
-
-
+    st.info("No data found to summarize.")
 
 
