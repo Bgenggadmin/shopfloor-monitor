@@ -3,193 +3,154 @@ import pandas as pd
 from datetime import datetime
 import pytz
 import os
+import base64
 from github import Github
+from io import BytesIO
+from PIL import Image
 
-# --- 1. SETUP & TIMEZONE (IST) ---
+# --- 1. SETUP & SECRETS ---
 IST = pytz.timezone('Asia/Kolkata')
-LOGS_FILE = "production_logs.csv"
-WORKERS_FILE = "workers.txt"
-JOBS_FILE = "jobs.txt"
+DB_FILE = "quality_logs.csv"
+PROD_FILE = "production_logs.csv" # The file to pull Job Codes from
 
-UNITS = {
-    "Welding": "Meters (Mts)", "Grinding": "Amount/Length (Mts)", 
-    "Drilling": "Quantity (Nos)", "Cutting (Plasma/Gas)": "Meters (Mts)",
-    "Fitting/Assembly": "Joints/Points (Nos)", "Marking": "Layouts (Nos)",
-    "Buffing/Polishing": "Square Feet (Sq Ft)", "Bending/Rolling": "Components (Nos)",
-    "Hydro-Testing": "Equipment (Nos)", "Painting/Coating": "Square Meters (Sq M)",
-    "Dispatch/Loading": "Weight (Tons/Kgs)"
+try:
+    REPO_NAME = st.secrets["GITHUB_REPO"]
+    TOKEN = st.secrets["GITHUB_TOKEN"]
+except Exception:
+    st.error("❌ Streamlit Secrets (GITHUB_REPO or GITHUB_TOKEN) are missing!")
+    st.stop()
+
+STAGE_REFS = {
+    "RM Inspection": "Heat No / Plate No",
+    "Marking": "Drawing Rev No",
+    "Dimensional Inspection": "Report No / Drawing Ref",
+    "Fit-up": "Joint No / Seam No",
+    "Welding": "Welder Stamp / ID",
+    "Grinding": "Wheel Type used",
+    "DP / LPI": "Report No / Batch No",
+    "Hydro Test": "Test Pressure (kg/cm2)",
+    "Pneumatic Test": "Test Pressure (kg/cm2)",
+    "Final Inspection": "QC Release Note No"
 }
 
-HEADERS = ["Timestamp", "Supervisor", "Worker", "Job_Code", "Activity", "Unit", "Output", "Hours", "Notes"]
+st.set_page_config(page_title="B&G Quality Master", layout="wide")
+st.title("🛡️ B&G Quality Master")
 
-# --- 2. GITHUB SYNC ---
-def sync_to_github(file_path):
+# --- 2. GITHUB & DATA UTILITIES ---
+def save_to_github(dataframe):
     try:
-        if "GITHUB_TOKEN" in st.secrets:
-            g = Github(st.secrets["GITHUB_TOKEN"])
-            repo = g.get_repo(st.secrets["GITHUB_REPO"])
-            with open(file_path, "r") as f:
-                content = f.read()
-            try:
-                contents = repo.get_contents(file_path)
-                repo.update_file(contents.path, f"Sync {datetime.now(IST)}", content, contents.sha)
-            except:
-                repo.create_file(file_path, "Initial Create", content)
+        g = Github(TOKEN)
+        repo = g.get_repo(REPO_NAME)
+        csv_content = dataframe.to_csv(index=False)
+        contents = repo.get_contents(DB_FILE)
+        repo.update_file(contents.path, f"QC Update {datetime.now(IST)}", csv_content, contents.sha)
+        return True
     except Exception as e:
-        st.error(f"Sync Error: {e}")
+        st.warning(f"⚠️ GitHub Sync Error: {e}")
+        return False
 
-def load_list(file_path, defaults):
-    if os.path.exists(file_path):
-        with open(file_path, "r") as f:
-            return [line.strip() for line in f.readlines() if line.strip()]
-    return defaults
+def load_data():
+    if os.path.exists(DB_FILE):
+        try: return pd.read_csv(DB_FILE)
+        except: pass
+    return pd.DataFrame(columns=["Timestamp", "Inspector", "Job_Code", "Stage", "Status", "Notes", "Photo"])
 
-st.set_page_config(page_title="B&G Production", layout="wide")
-st.title("🏗️ B&G Production & Progress Tracker")
-
-workers = load_list(WORKERS_FILE, ["Prasanth", "RamaSai", "Subodth", "Sunil", "Naresh", "Ravindra"])
-job_list = load_list(JOBS_FILE, ["SSR501", "SSR502", "VESSEL-101"])
-
-# --- 3. ENTRY FORM (FIXED LIVE UNIT UPDATING) ---
-# Use columns OUTSIDE the form for the live-updating dropdowns
-col1, col2 = st.columns(2)
-with col1:
-    supervisor = st.selectbox("Supervisor", ["Prasanth", "RamaSai", "Sunil", "Ravindra", "Naresh", "Subodth"])
-    worker = st.selectbox("Worker Name", workers)
-    job_code = st.selectbox("Job Code", job_list)
-with col2:
-    # This selection now triggers an immediate change in unit_label
-    activity = st.selectbox("Activity", list(UNITS.keys()))
-    unit_label = UNITS[activity] # <--- THIS NOW UPDATES INSTANTLY
-    output = st.number_input(f"Output ({unit_label})", min_value=0.0)
-    hours = st.number_input("Man-Hours Spent", min_value=0.0, step=0.5)
-    notes = st.text_area("Remarks/Notes")
-
-if st.button("🚀 Submit Production Log"):
-    ts = datetime.now(IST).strftime('%Y-%m-%d %H:%M')
-    new_row = [ts, supervisor, worker, job_code, activity, unit_label, output, hours, notes]
-    
-    if os.path.exists(LOGS_FILE):
+# Helper to get Job Codes from Production
+def get_production_jobs():
+    if os.path.exists(PROD_FILE):
         try:
-            df = pd.read_csv(LOGS_FILE)
-            df = df.loc[:, ~df.columns.duplicated()]
-            df = df.rename(columns={'Job': 'Job_Code', 'Remarks': 'Notes'})
-            new_df = pd.DataFrame([new_row], columns=HEADERS)
-            df = pd.concat([df[HEADERS], new_df], ignore_index=True)
-        except:
-            df = pd.DataFrame([new_row], columns=HEADERS)
-    else:
-        df = pd.DataFrame([new_row], columns=HEADERS)
-    
-    df.to_csv(LOGS_FILE, index=False)
-    sync_to_github(LOGS_FILE)
-    st.success(f"✅ Logged & Synced at {ts}")
-    st.rerun()
+            prod_df = pd.read_csv(PROD_FILE)
+            if "Job_Code" in prod_df.columns:
+                # Get unique jobs, remove empty ones, and sort them
+                jobs = prod_df["Job_Code"].dropna().unique().tolist()
+                return sorted([str(j) for j in jobs])
+        except: pass
+    return []
 
-# --- 4. DISPLAY (TODAY ONLY) ---
-st.divider()
-if os.path.exists(LOGS_FILE):
-    df_view = pd.read_csv(LOGS_FILE).reindex(columns=HEADERS)
-    
-    # Create a Date column for temporary filtering
-    df_view['Date'] = pd.to_datetime(df_view['Timestamp']).dt.date
-    today_ist = datetime.now(IST).date()
-    
-    # Filter for the main dashboard table
-    df_today = df_view[df_view['Date'] == today_ist].drop(columns=['Date'])
-    df_all = df_view.sort_values(by="Timestamp", ascending=False).drop(columns=['Date'])
+df = load_data()
+job_list = get_production_jobs()
 
-    st.subheader("📊 Today's Job Progress")
-    if not df_today.empty:
-        # Show only today's work at the top
-        st.table(df_today.sort_values(by="Timestamp", ascending=False))
-    else:
-        st.info(f"No entries recorded yet for today ({today_ist}).")
+# --- 3. ADMIN: DELETE ENTRY ---
+st.sidebar.header("⚙️ Admin Controls")
+if not df.empty:
+    st.sidebar.subheader("🗑️ Delete Entry")
+    delete_options = [f"{i}: {df.at[i, 'Job_Code']} - {df.at[i, 'Stage']}" for i in df.index[::-1]]
+    target = st.sidebar.selectbox("Select entry to remove", delete_options)
+    if st.sidebar.button("Confirm Delete"):
+        idx = int(target.split(":")[0])
+        df = df.drop(idx)
+        df.to_csv(DB_FILE, index=False)
+        save_to_github(df)
+        st.sidebar.success("Entry Deleted!")
+        st.rerun()
 
-    with st.expander("🔍 View All Historical Detailed Logs", expanded=False):
-        st.dataframe(df_all, use_container_width=True)
-        csv = df_all.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Download Full CSV Report", csv, "Full_Production_Report.csv")
-# --- 5. MANAGEMENT & SUMMARY (CLEAN VIEW) ---
-st.divider()
-st.header("📊 Management & Production Summary")
-
-if os.path.exists(LOGS_FILE):
-    df_mngt = pd.read_csv(LOGS_FILE)
-    df_mngt['Date'] = pd.to_datetime(df_mngt['Timestamp']).dt.date
-    
-    # --- A. ADVANCED SEARCH ---
-    st.subheader("🔍 Filter Records")
-    col1, col2, col3 = st.columns(3)
-    
+# --- 4. INPUT FORM ---
+with st.form("quality_form", clear_on_submit=True):
+    col1, col2 = st.columns(2)
     with col1:
-        # DEFAULT TO TODAY ONLY
-        today = datetime.now(IST).date()
-        date_pick = st.date_input("Select Date / Range", value=today)
-        
-        # Filtering logic for Today, Single Date, or Range
-        if isinstance(date_pick, (list, tuple)) and len(date_pick) == 2:
-            mask = (df_mngt['Date'] >= date_pick[0]) & (df_mngt['Date'] <= date_pick[1])
-        elif isinstance(date_pick, (list, tuple)) and len(date_pick) == 1:
-            mask = (df_mngt['Date'] == date_pick[0])
+        # --- JOB CODE SELECTION LOGIC ---
+        if job_list:
+            selected_job = st.selectbox("Select Job Code", ["-- Select Job --", "➕ Type New Job Code"] + job_list)
+            if selected_job == "➕ Type New Job Code":
+                job_code = st.text_input("Enter New Job Code").upper()
+            else:
+                job_code = selected_job
         else:
-            mask = (df_mngt['Date'] == date_pick)
-
+            job_code = st.text_input("Job Code (Manual Entry)").upper()
+        
+        inspector = st.selectbox("Inspector", ["Subodth", "Prasanth", "RamaSai", "Naresh"])
+        stage = st.selectbox("Stage", list(STAGE_REFS.keys()))
+        
     with col2:
-        search_job = st.multiselect("Filter by Job", options=sorted(df_mngt['Job_Code'].unique()))
-    with col3:
-        search_worker = st.multiselect("Filter by Worker", options=sorted(df_mngt['Worker'].unique()))
+        ref_data = st.text_input(f"Reference: {STAGE_REFS[stage]}")
+        status = st.radio("Result", ["Passed", "Rework", "Failed"], horizontal=True)
+        remarks = st.text_area("Remarks")
 
-    # Apply Filters
-    filtered_df = df_mngt[mask]
-    if search_job: filtered_df = filtered_df[filtered_df['Job_Code'].isin(search_job)]
-    if search_worker: filtered_df = filtered_df[filtered_df['Worker'].isin(search_worker)]
+    cam_photo = st.camera_input("Take Photo")
     
-    # SHOW FILTERED DATA
-    if not filtered_df.empty:
-        st.write(f"Showing **{len(filtered_df)}** records for the selected period.")
-        st.dataframe(filtered_df.sort_values(by="Timestamp", ascending=False), use_container_width=True)
-        
-        # --- B. SUMMARIES ---
-        st.subheader("📈 Period Totals")
-        choice_map = {"Job Code": "Job_Code", "Worker": "Worker", "Activity": "Activity"}
-        summary_choice = st.radio("Group By:", list(choice_map.keys()), horizontal=True)
-        
-        summary_table = filtered_df.groupby(choice_map[summary_choice]).agg({'Output': 'sum', 'Hours': 'sum'}).reset_index()
-        st.table(summary_table)
-    else:
-        st.info("No records found for this date. Change the date filter above to see history.")
+    if st.form_submit_button("🚀 Submit & Sync to GitHub"):
+        if job_code in ["-- Select Job --", ""]:
+            st.error("Please provide a valid Job Code.")
+        else:
+            img_str = ""
+            if cam_photo:
+                img = Image.open(cam_photo)
+                buffered = BytesIO()
+                img.save(buffered, format="JPEG")
+                img_str = base64.b64encode(buffered.getvalue()).decode()
+            
+            full_notes = f"{ref_data} | {remarks}"
+            new_row = pd.DataFrame([{
+                "Timestamp": datetime.now(IST).strftime('%Y-%m-%d %H:%M'),
+                "Inspector": inspector, "Job_Code": job_code, "Stage": stage,
+                "Status": status, "Notes": full_notes, "Photo": img_str
+            }])
+            
+            updated_df = pd.concat([df, new_row], ignore_index=True)
+            updated_df.to_csv(DB_FILE, index=False)
+            if save_to_github(updated_df):
+                st.success(f"✅ Quality Record for {job_code} Secured!")
+                st.balloons()
+                st.rerun()
 
-    # --- C. EXCEL & CLEANUP (Keep these at the bottom) ---
-    st.divider()
-    col_ex, col_del = st.columns(2)
-    with col_ex:
-        def to_excel(df):
-            import io
-            output = io.BytesIO()
-            try:
-                writer = pd.ExcelWriter(output, engine='xlsxwriter')
-                df.to_excel(writer, index=False, sheet_name='Production_Logs')
-                writer.close()
-                return output.getvalue()
-            except: return None
-
-        excel_data = to_excel(df_mngt)
-        if excel_data:
-            st.download_button("📥 Download Master Excel", data=excel_data, 
-                               file_name=f"BG_Master_Report_{today}.xlsx")
+# --- 5. CLEAN AUDIT HISTORY & PHOTOS ---
+st.divider()
+df_view = load_data()
+if not df_view.empty:
+    tab1, tab2 = st.tabs(["📜 History", "🖼️ Photos"])
+    with tab1:
+        desired_cols = ["Timestamp", "Inspector", "Job_Code", "Stage", "Status", "Notes"]
+        available_cols = [c for c in desired_cols if c in df_view.columns]
+        st.dataframe(df_view[available_cols].sort_values(by="Timestamp", ascending=False), use_container_width=True)
     
-    with col_del:
-        with st.expander("🗑️ Delete Entry"):
-            if not filtered_df.empty:
-                delete_options = filtered_df['Timestamp'].astype(str) + " | " + filtered_df['Worker'] + " | " + filtered_df['Job_Code']
-                to_delete = st.selectbox("Select to remove", delete_options)
-                if st.button("❌ Confirm Delete"):
-                    ts_del, work_del, job_del = to_delete.split(" | ")
-                    df_final = df_mngt[~((df_mngt['Timestamp'].astype(str) == ts_del) & 
-                                         (df_mngt['Worker'] == work_del) & 
-                                         (df_mngt['Job_Code'] == job_del))]
-                    df_final.drop(columns=['Date'], errors='ignore').to_csv(LOGS_FILE, index=False)
-                    sync_to_github(LOGS_FILE)
-                    st.rerun()
-
+    with tab2:
+        unique_q_jobs = [j for j in df_view['Job_Code'].unique() if str(j) != 'nan']
+        view_job = st.selectbox("Filter Photos", ["-- Select --"] + unique_q_jobs)
+        if view_job != "-- Select --":
+            job_data = df_view[df_view['Job_Code'] == view_job]
+            for _, row in job_data.iterrows():
+                photo_data = row.get('Photo')
+                if isinstance(photo_data, str) and len(photo_data) > 100:
+                    st.write(f"**{row['Stage']}** | {row['Status']} | {row['Timestamp']}")
+                    st.image(base64.b64decode(photo_data), width=500)
+                    st.divider()
