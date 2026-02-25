@@ -97,39 +97,53 @@ if os.path.exists(LOGS_FILE):
         st.dataframe(df_display, use_container_width=True)
         csv = df_view.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Excel Report", csv, "BG_Production_Report.csv")
-# --- 5. MANAGEMENT & SUMMARY (BULLETPROOF VERSION) ---
+# --- 5. MANAGEMENT, SUMMARY & EXCEL REPORTS ---
 st.divider()
 st.header("📊 Management & Production Summary")
 
 if os.path.exists(LOGS_FILE):
     df_mngt = pd.read_csv(LOGS_FILE)
-    
-    # 1. PREPARE DATA
-    df_mngt = df_mngt.loc[:, ~df_mngt.columns.duplicated()]
     df_mngt['Date'] = pd.to_datetime(df_mngt['Timestamp']).dt.date
     
+    # --- A. EXCEL DOWNLOAD (TOP) ---
+    # Convert whole log to Excel for office records
+    def to_excel(df):
+        import io
+        output = io.BytesIO()
+        writer = pd.ExcelWriter(output, engine='xlsxwriter')
+        df.to_excel(writer, index=False, sheet_name='Production_Logs')
+        writer.close()
+        return output.getvalue()
+
+    st.download_button(
+        label="📥 Download Full Excel Report",
+        data=to_excel(df_mngt),
+        file_name=f"BG_Production_Report_{datetime.now(IST).strftime('%Y%m%d')}.xlsx",
+        mime="application/vnd.ms-excel"
+    )
+
+    # --- B. ADVANCED SEARCH ---
     st.subheader("🔍 Advanced Search")
     col_f1, col_f2, col_f3 = st.columns(3)
     
     with col_f1:
-        # SAFETY FIX: Using a simple date selector to prevent API Exceptions
+        # STABLE DATE SELECTOR: Prevents StreamlitAPIException
         min_d, max_d = df_mngt['Date'].min(), df_mngt['Date'].max()
-        selected_dates = st.date_input("Filter by Date Range", value=(min_d, max_d))
-        
-        # Handle the logic if user picks 1 date or 2 dates
-        if isinstance(selected_dates, tuple) and len(selected_dates) == 2:
-            start_date, end_date = selected_dates
-            mask = (df_mngt['Date'] >= start_date) & (df_mngt['Date'] <= end_date)
-        else:
-            # If only one date is selected, filter for just that day
-            mask = (df_mngt['Date'] == selected_dates[0]) if isinstance(selected_dates, tuple) else (df_mngt['Date'] == selected_dates)
+        try:
+            date_range = st.date_input("Filter by Date Range", value=(min_d, max_d))
+            if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+                mask = (df_mngt['Date'] >= date_range[0]) & (df_mngt['Date'] <= date_range[1])
+            else:
+                mask = (df_mngt['Date'] == (date_range[0] if isinstance(date_range, (list, tuple)) else date_range))
+        except:
+            mask = df_mngt['Date'].notna() # Fallback to show all if picker is in transition
 
     with col_f2:
         search_job = st.multiselect("Filter by Job", options=sorted(df_mngt['Job_Code'].unique()))
     with col_f3:
         search_worker = st.multiselect("Filter by Worker", options=sorted(df_mngt['Worker'].unique()))
 
-    # APPLY FILTERS
+    # Apply Filters
     filtered_df = df_mngt[mask]
     if search_job:
         filtered_df = filtered_df[filtered_df['Job_Code'].isin(search_job)]
@@ -138,31 +152,29 @@ if os.path.exists(LOGS_FILE):
 
     st.dataframe(filtered_df.sort_values(by="Timestamp", ascending=False), use_container_width=True)
 
-    # 2. SUMMARIES (KEYERROR FIXED)
+    # --- C. SUMMARIES ---
     st.subheader("📈 Production Totals")
     choice_map = {"Job Code": "Job_Code", "Worker": "Worker", "Activity": "Activity"}
     summary_choice = st.radio("Sum up totals by:", list(choice_map.keys()), horizontal=True)
     actual_col = choice_map[summary_choice]
     
     if not filtered_df.empty:
-        # Group and sum Output and Hours
         summary_table = filtered_df.groupby(actual_col).agg({'Output': 'sum', 'Hours': 'sum'}).reset_index()
         st.table(summary_table)
 
-    # 3. CLEANUP (DELETE)
+    # --- D. DELETE ENTRY ---
     st.subheader("🗑️ Data Cleanup")
-    with st.expander("Delete an entry"):
-        if not filtered_df.empty:
-            delete_options = filtered_df['Timestamp'] + " | " + filtered_df['Worker'] + " | " + filtered_df['Job_Code']
-            to_delete = st.selectbox("Select record to remove", delete_options)
-            if st.button("❌ Permanent Delete"):
-                ts_del, work_del, job_del = to_delete.split(" | ")
-                df_final = df_mngt[~((df_mngt['Timestamp'] == ts_del) & 
-                                     (df_mngt['Worker'] == work_del) & 
-                                     (df_mngt['Job_Code'] == job_del))]
-                df_final.drop(columns=['Date'], errors='ignore').to_csv(LOGS_FILE, index=False)
-                sync_to_github(LOGS_FILE)
-                st.success("Entry deleted. Refreshing...")
-                st.rerun()
+    with st.expander("Delete an accidental entry"):
+        delete_options = filtered_df['Timestamp'] + " | " + filtered_df['Worker'] + " | " + filtered_df['Job_Code']
+        to_delete = st.selectbox("Select record to remove", delete_options)
+        if st.button("❌ Permanent Delete"):
+            ts_del, work_del, job_del = to_delete.split(" | ")
+            df_final = df_mngt[~((df_mngt['Timestamp'] == ts_del) & 
+                                 (df_mngt['Worker'] == work_del) & 
+                                 (df_mngt['Job_Code'] == job_del))]
+            df_final.drop(columns=['Date'], errors='ignore').to_csv(LOGS_FILE, index=False)
+            sync_to_github(LOGS_FILE)
+            st.success("Entry deleted. Refreshing...")
+            st.rerun()
 else:
-    st.info("No production logs found yet.")       
+    st.info("No production logs found yet.")
