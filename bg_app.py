@@ -97,7 +97,7 @@ if os.path.exists(LOGS_FILE):
         st.dataframe(df_display, use_container_width=True)
         csv = df_view.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Excel Report", csv, "BG_Production_Report.csv")
-# --- 5. MANAGEMENT, SUMMARY & EXCEL REPORTS ---
+# --- 5. MANAGEMENT & SUMMARY (CLEAN VIEW) ---
 st.divider()
 st.header("📊 Management & Production Summary")
 
@@ -105,76 +105,77 @@ if os.path.exists(LOGS_FILE):
     df_mngt = pd.read_csv(LOGS_FILE)
     df_mngt['Date'] = pd.to_datetime(df_mngt['Timestamp']).dt.date
     
-    # --- A. EXCEL DOWNLOAD (TOP) ---
-    # Convert whole log to Excel for office records
-    def to_excel(df):
-        import io
-        output = io.BytesIO()
-        writer = pd.ExcelWriter(output, engine='xlsxwriter')
-        df.to_excel(writer, index=False, sheet_name='Production_Logs')
-        writer.close()
-        return output.getvalue()
-
-    st.download_button(
-        label="📥 Download Full Excel Report",
-        data=to_excel(df_mngt),
-        file_name=f"BG_Production_Report_{datetime.now(IST).strftime('%Y%m%d')}.xlsx",
-        mime="application/vnd.ms-excel"
-    )
-
-    # --- B. ADVANCED SEARCH ---
-    st.subheader("🔍 Advanced Search")
-    col_f1, col_f2, col_f3 = st.columns(3)
+    # --- A. ADVANCED SEARCH ---
+    st.subheader("🔍 Filter Records")
+    col1, col2, col3 = st.columns(3)
     
-    with col_f1:
-        # STABLE DATE SELECTOR: Prevents StreamlitAPIException
-        min_d, max_d = df_mngt['Date'].min(), df_mngt['Date'].max()
-        try:
-            date_range = st.date_input("Filter by Date Range", value=(min_d, max_d))
-            if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
-                mask = (df_mngt['Date'] >= date_range[0]) & (df_mngt['Date'] <= date_range[1])
-            else:
-                mask = (df_mngt['Date'] == (date_range[0] if isinstance(date_range, (list, tuple)) else date_range))
-        except:
-            mask = df_mngt['Date'].notna() # Fallback to show all if picker is in transition
+    with col1:
+        # DEFAULT TO TODAY ONLY
+        today = datetime.now(IST).date()
+        date_pick = st.date_input("Select Date / Range", value=today)
+        
+        # Filtering logic for Today, Single Date, or Range
+        if isinstance(date_pick, (list, tuple)) and len(date_pick) == 2:
+            mask = (df_mngt['Date'] >= date_pick[0]) & (df_mngt['Date'] <= date_pick[1])
+        elif isinstance(date_pick, (list, tuple)) and len(date_pick) == 1:
+            mask = (df_mngt['Date'] == date_pick[0])
+        else:
+            mask = (df_mngt['Date'] == date_pick)
 
-    with col_f2:
+    with col2:
         search_job = st.multiselect("Filter by Job", options=sorted(df_mngt['Job_Code'].unique()))
-    with col_f3:
+    with col3:
         search_worker = st.multiselect("Filter by Worker", options=sorted(df_mngt['Worker'].unique()))
 
     # Apply Filters
     filtered_df = df_mngt[mask]
-    if search_job:
-        filtered_df = filtered_df[filtered_df['Job_Code'].isin(search_job)]
-    if search_worker:
-        filtered_df = filtered_df[filtered_df['Worker'].isin(search_worker)]
-
-    st.dataframe(filtered_df.sort_values(by="Timestamp", ascending=False), use_container_width=True)
-
-    # --- C. SUMMARIES ---
-    st.subheader("📈 Production Totals")
-    choice_map = {"Job Code": "Job_Code", "Worker": "Worker", "Activity": "Activity"}
-    summary_choice = st.radio("Sum up totals by:", list(choice_map.keys()), horizontal=True)
-    actual_col = choice_map[summary_choice]
+    if search_job: filtered_df = filtered_df[filtered_df['Job_Code'].isin(search_job)]
+    if search_worker: filtered_df = filtered_df[filtered_df['Worker'].isin(search_worker)]
     
+    # SHOW FILTERED DATA
     if not filtered_df.empty:
-        summary_table = filtered_df.groupby(actual_col).agg({'Output': 'sum', 'Hours': 'sum'}).reset_index()
+        st.write(f"Showing **{len(filtered_df)}** records for the selected period.")
+        st.dataframe(filtered_df.sort_values(by="Timestamp", ascending=False), use_container_width=True)
+        
+        # --- B. SUMMARIES ---
+        st.subheader("📈 Period Totals")
+        choice_map = {"Job Code": "Job_Code", "Worker": "Worker", "Activity": "Activity"}
+        summary_choice = st.radio("Group By:", list(choice_map.keys()), horizontal=True)
+        
+        summary_table = filtered_df.groupby(choice_map[summary_choice]).agg({'Output': 'sum', 'Hours': 'sum'}).reset_index()
         st.table(summary_table)
+    else:
+        st.info("No records found for this date. Change the date filter above to see history.")
 
-    # --- D. DELETE ENTRY ---
-    st.subheader("🗑️ Data Cleanup")
-    with st.expander("Delete an accidental entry"):
-        delete_options = filtered_df['Timestamp'] + " | " + filtered_df['Worker'] + " | " + filtered_df['Job_Code']
-        to_delete = st.selectbox("Select record to remove", delete_options)
-        if st.button("❌ Permanent Delete"):
-            ts_del, work_del, job_del = to_delete.split(" | ")
-            df_final = df_mngt[~((df_mngt['Timestamp'] == ts_del) & 
-                                 (df_mngt['Worker'] == work_del) & 
-                                 (df_mngt['Job_Code'] == job_del))]
-            df_final.drop(columns=['Date'], errors='ignore').to_csv(LOGS_FILE, index=False)
-            sync_to_github(LOGS_FILE)
-            st.success("Entry deleted. Refreshing...")
-            st.rerun()
-else:
-    st.info("No production logs found yet.")
+    # --- C. EXCEL & CLEANUP (Keep these at the bottom) ---
+    st.divider()
+    col_ex, col_del = st.columns(2)
+    with col_ex:
+        def to_excel(df):
+            import io
+            output = io.BytesIO()
+            try:
+                writer = pd.ExcelWriter(output, engine='xlsxwriter')
+                df.to_excel(writer, index=False, sheet_name='Production_Logs')
+                writer.close()
+                return output.getvalue()
+            except: return None
+
+        excel_data = to_excel(df_mngt)
+        if excel_data:
+            st.download_button("📥 Download Master Excel", data=excel_data, 
+                               file_name=f"BG_Master_Report_{today}.xlsx")
+    
+    with col_del:
+        with st.expander("🗑️ Delete Entry"):
+            if not filtered_df.empty:
+                delete_options = filtered_df['Timestamp'].astype(str) + " | " + filtered_df['Worker'] + " | " + filtered_df['Job_Code']
+                to_delete = st.selectbox("Select to remove", delete_options)
+                if st.button("❌ Confirm Delete"):
+                    ts_del, work_del, job_del = to_delete.split(" | ")
+                    df_final = df_mngt[~((df_mngt['Timestamp'].astype(str) == ts_del) & 
+                                         (df_mngt['Worker'] == work_del) & 
+                                         (df_mngt['Job_Code'] == job_del))]
+                    df_final.drop(columns=['Date'], errors='ignore').to_csv(LOGS_FILE, index=False)
+                    sync_to_github(LOGS_FILE)
+                    st.rerun()
