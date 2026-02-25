@@ -47,14 +47,14 @@ def load_list(file_path, defaults):
 st.set_page_config(page_title="B&G Production", layout="wide")
 st.title("🏗️ B&G Production & Progress Tracker")
 
-workers = load_list(WORKERS_FILE, ["Prasanth", "RamaSai",  "Subodth", "Sunil", "Naresh",  "Ravindra"])
+workers = load_list(WORKERS_FILE, ["Prasanth", "RamaSai", "Subodth", "Sunil", "Naresh", "Ravindra"])
 job_list = load_list(JOBS_FILE, ["SSR501", "SSR502", "VESSEL-101"])
 
 # --- 3. ENTRY FORM (FIXED LIVE UNIT UPDATING) ---
 # Use columns OUTSIDE the form for the live-updating dropdowns
 col1, col2 = st.columns(2)
 with col1:
-    supervisor = st.selectbox("Supervisor", ["Prasanth", "RamaSai", "Sunil" "Ravindra" "Naresh" "Subodth"])
+    supervisor = st.selectbox("Supervisor", ["Prasanth", "RamaSai", "Sunil", "Ravindra", "Naresh", "Subodth"])
     worker = st.selectbox("Worker Name", workers)
     job_code = st.selectbox("Job Code", job_list)
 with col2:
@@ -97,5 +97,6 @@ if os.path.exists(LOGS_FILE):
         st.dataframe(df_display, use_container_width=True)
         csv = df_view.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Excel Report", csv, "BG_Production_Report.csv")
+
 
 
