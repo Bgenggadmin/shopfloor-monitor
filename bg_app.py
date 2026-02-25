@@ -86,17 +86,30 @@ if st.button("🚀 Submit Production Log"):
     st.success(f"✅ Logged & Synced at {ts}")
     st.rerun()
 
-# --- 4. DISPLAY ---
+# --- 4. DISPLAY (TODAY ONLY) ---
 st.divider()
 if os.path.exists(LOGS_FILE):
     df_view = pd.read_csv(LOGS_FILE).reindex(columns=HEADERS)
-    df_display = df_view.sort_values(by="Timestamp", ascending=False)
-    st.subheader("📊 Job Progress Summary")
-    st.table(df_display.head(10)) 
-    with st.expander("🔍 View All Detailed Logs", expanded=True):
-        st.dataframe(df_display, use_container_width=True)
-        csv = df_view.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Download Excel Report", csv, "BG_Production_Report.csv")
+    
+    # Create a Date column for temporary filtering
+    df_view['Date'] = pd.to_datetime(df_view['Timestamp']).dt.date
+    today_ist = datetime.now(IST).date()
+    
+    # Filter for the main dashboard table
+    df_today = df_view[df_view['Date'] == today_ist].drop(columns=['Date'])
+    df_all = df_view.sort_values(by="Timestamp", ascending=False).drop(columns=['Date'])
+
+    st.subheader("📊 Today's Job Progress")
+    if not df_today.empty:
+        # Show only today's work at the top
+        st.table(df_today.sort_values(by="Timestamp", ascending=False))
+    else:
+        st.info(f"No entries recorded yet for today ({today_ist}).")
+
+    with st.expander("🔍 View All Historical Detailed Logs", expanded=False):
+        st.dataframe(df_all, use_container_width=True)
+        csv = df_all.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Download Full CSV Report", csv, "Full_Production_Report.csv")
 # --- 5. MANAGEMENT & SUMMARY (CLEAN VIEW) ---
 st.divider()
 st.header("📊 Management & Production Summary")
@@ -179,3 +192,4 @@ if os.path.exists(LOGS_FILE):
                     df_final.drop(columns=['Date'], errors='ignore').to_csv(LOGS_FILE, index=False)
                     sync_to_github(LOGS_FILE)
                     st.rerun()
+
