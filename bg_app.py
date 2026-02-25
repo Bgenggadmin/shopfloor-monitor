@@ -97,8 +97,7 @@ if os.path.exists(LOGS_FILE):
         st.dataframe(df_display, use_container_width=True)
         csv = df_view.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Excel Report", csv, "BG_Production_Report.csv")
-       
-# --- 5. MANAGEMENT & SUMMARY (PHASE 2 - PERFECT VERSION) ---
+# --- 5. MANAGEMENT & SUMMARY (BULLETPROOF VERSION) ---
 st.divider()
 st.header("📊 Management & Production Summary")
 
@@ -113,26 +112,24 @@ if os.path.exists(LOGS_FILE):
     col_f1, col_f2, col_f3 = st.columns(3)
     
     with col_f1:
-        # Handle date range safely
+        # SAFETY FIX: Using a simple date selector to prevent API Exceptions
         min_d, max_d = df_mngt['Date'].min(), df_mngt['Date'].max()
-        if min_d == max_d:
-            date_val = st.date_input("Filter by Date", value=min_d)
-            mask = (df_mngt['Date'] == date_val)
+        selected_dates = st.date_input("Filter by Date Range", value=(min_d, max_d))
+        
+        # Handle the logic if user picks 1 date or 2 dates
+        if isinstance(selected_dates, tuple) and len(selected_dates) == 2:
+            start_date, end_date = selected_dates
+            mask = (df_mngt['Date'] >= start_date) & (df_mngt['Date'] <= end_date)
         else:
-            date_range = st.date_input("Filter by Date Range", value=[min_d, max_d])
-            if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
-                mask = (df_mngt['Date'] >= date_range[0]) & (df_mngt['Date'] <= date_range[1])
-            elif isinstance(date_range, (list, tuple)):
-                mask = (df_mngt['Date'] == date_range[0])
-            else:
-                mask = (df_mngt['Date'] == date_range)
+            # If only one date is selected, filter for just that day
+            mask = (df_mngt['Date'] == selected_dates[0]) if isinstance(selected_dates, tuple) else (df_mngt['Date'] == selected_dates)
 
     with col_f2:
         search_job = st.multiselect("Filter by Job", options=sorted(df_mngt['Job_Code'].unique()))
     with col_f3:
         search_worker = st.multiselect("Filter by Worker", options=sorted(df_mngt['Worker'].unique()))
 
-    # APPLY FILTERS (Bracket Fixed Here)
+    # APPLY FILTERS
     filtered_df = df_mngt[mask]
     if search_job:
         filtered_df = filtered_df[filtered_df['Job_Code'].isin(search_job)]
@@ -148,6 +145,7 @@ if os.path.exists(LOGS_FILE):
     actual_col = choice_map[summary_choice]
     
     if not filtered_df.empty:
+        # Group and sum Output and Hours
         summary_table = filtered_df.groupby(actual_col).agg({'Output': 'sum', 'Hours': 'sum'}).reset_index()
         st.table(summary_table)
 
@@ -164,8 +162,7 @@ if os.path.exists(LOGS_FILE):
                                      (df_mngt['Job_Code'] == job_del))]
                 df_final.drop(columns=['Date'], errors='ignore').to_csv(LOGS_FILE, index=False)
                 sync_to_github(LOGS_FILE)
-                st.success("Entry deleted. Page will refresh.")
+                st.success("Entry deleted. Refreshing...")
                 st.rerun()
 else:
-    st.info("No logs found.")
-
+    st.info("No production logs found yet.")       
