@@ -37,7 +37,6 @@ def load_data():
 # --- 3. SESSION STATE FOR DYNAMIC DROPDOWNS ---
 df = load_data()
 
-# Initialize dropdown lists in session state so buttons can update them instantly
 if 'p_supervisors' not in st.session_state:
     st.session_state.p_supervisors = sorted(df["Supervisor"].dropna().unique().tolist()) if not df.empty else ["RamaSai", "Ravindra", "Subodth", "Prasanth"]
 if 'p_workers' not in st.session_state:
@@ -47,13 +46,29 @@ if 'p_jobs' not in st.session_state:
 if 'p_activities' not in st.session_state:
     st.session_state.p_activities = sorted(df["Activity"].dropna().unique().tolist()) if not df.empty else ["Cutting (Plasma/Gas)", "Bending/Rolling", "Marking", "Fitting/Assembly", "Welding", "Grinding"]
 
-# --- 4. THE "ADD NEW" SECTION ---
+# --- 4. ADMIN: DELETE LAST ENTRY ---
+st.sidebar.header("⚙️ Admin Controls")
+if not df.empty:
+    st.sidebar.subheader("🗑️ Remove Mistake")
+    # Show the last 5 entries as options to delete
+    last_entries = df.tail(5).index[::-1]
+    delete_options = [f"Row {i}: {df.at[i, 'Job_Code']} ({df.at[i, 'Activity']})" for i in last_entries]
+    to_delete = st.sidebar.selectbox("Select entry to delete", delete_options)
+    
+    if st.sidebar.button("Confirm Delete"):
+        idx = int(to_delete.split(":")[0].replace("Row ", ""))
+        df = df.drop(idx)
+        df.to_csv(DB_FILE, index=False)
+        if save_to_github(df):
+            st.sidebar.success("Entry Removed!")
+            st.rerun()
+
+# --- 5. THE "ADD NEW" SECTION ---
 st.title("🏗️ B&G Production Master")
 
 with st.expander("➕ ADD NEW OPTIONS (Supervisor / Worker / Job / Activity)"):
     c1, c2, c3, c4 = st.columns(4)
     
-    # Add Supervisor
     ns = c1.text_input("New Supervisor")
     if c1.button("Add Supervisor"):
         if ns and ns not in st.session_state.p_supervisors:
@@ -61,7 +76,6 @@ with st.expander("➕ ADD NEW OPTIONS (Supervisor / Worker / Job / Activity)"):
             st.session_state.p_supervisors.sort()
             st.success(f"Added {ns}")
 
-    # Add Worker
     nw = c2.text_input("New Worker")
     if c2.button("Add Worker"):
         if nw and nw not in st.session_state.p_workers:
@@ -69,7 +83,6 @@ with st.expander("➕ ADD NEW OPTIONS (Supervisor / Worker / Job / Activity)"):
             st.session_state.p_workers.sort()
             st.success(f"Added {nw}")
 
-    # Add Job
     nj = c3.text_input("New Job Code")
     if c3.button("Add Job"):
         if nj and nj not in st.session_state.p_jobs:
@@ -77,7 +90,6 @@ with st.expander("➕ ADD NEW OPTIONS (Supervisor / Worker / Job / Activity)"):
             st.session_state.p_jobs.sort()
             st.success(f"Added {nj}")
 
-    # Add Activity
     na = c4.text_input("New Activity")
     if c4.button("Add Activity"):
         if na and na not in st.session_state.p_activities:
@@ -87,7 +99,7 @@ with st.expander("➕ ADD NEW OPTIONS (Supervisor / Worker / Job / Activity)"):
 
 st.divider()
 
-# --- 5. MAIN PRODUCTION FORM ---
+# --- 6. MAIN PRODUCTION FORM ---
 with st.form("production_form", clear_on_submit=True):
     col1, col2 = st.columns(2)
     with col1:
@@ -115,10 +127,10 @@ with st.form("production_form", clear_on_submit=True):
             df = pd.concat([df, new_row], ignore_index=True)
             df.to_csv(DB_FILE, index=False)
             if save_to_github(df):
-                st.success(f"✅ Production for {job_code} logged!")
+                st.success(f"✅ Data for {job_code} Logged!")
                 st.rerun()
 
-# --- 6. HISTORY ---
+# --- 7. HISTORY ---
 st.divider()
 st.subheader("📋 Recent Production Logs")
 if not df.empty:
