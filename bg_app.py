@@ -38,39 +38,42 @@ if os.path.exists(DB_FILE):
 else:
     df = pd.DataFrame(columns=["Timestamp", "Supervisor", "Worker", "Job_Code", "Heat_No", "Activity", "Unit", "Output", "Hours", "Notes"])
 
-# --- 3. DYNAMIC LISTS (Self-Learning from CSV) ---
-# This ensures that if you added a name yesterday, it is in the list today.
+# --- 3. DYNAMIC LIST LOGIC ---
 def get_list(column_name, default_list):
     if not df.empty and column_name in df.columns:
         found_items = df[column_name].dropna().unique().tolist()
-        # Combine defaults with what's in the CSV and remove duplicates
-        return sorted(list(set(default_list + [str(x) for x in found_items])))
+        # Merge default items with what is in the CSV
+        return sorted(list(set(default_list + [str(x) for x in found_items if str(x).strip() != ""])))
     return sorted(default_list)
 
-# Initial defaults in case the CSV is empty
+# Load current lists
 supervisors = get_list("Supervisor", ["RamaSai", "Ravindra", "Subodth", "Prasanth"])
 workers = get_list("Worker", [])
 jobs = get_list("Job_Code", [])
+activities = get_list("Activity", ["Cutting (Plasma/Gas)", "Bending/Rolling", "Marking", "Fitting/Assembly", "Welding", "Grinding"])
 
 # --- 4. INPUT FORM ---
 with st.form("production_form", clear_on_submit=True):
     col1, col2 = st.columns(2)
     with col1:
-        # --- SUPERVISOR DROPDOWN ---
-        s_select = st.selectbox("Supervisor", ["-- Select Supervisor --", "➕ Add New Supervisor"] + supervisors)
-        supervisor = st.text_input("New Supervisor Name") if s_select == "➕ Add New Supervisor" else s_select
+        # SUPERVISOR
+        s_sel = st.selectbox("Supervisor", ["-- Select Supervisor --", "➕ Add New"] + supervisors)
+        supervisor = st.text_input("New Supervisor Name") if s_sel == "➕ Add New" else s_sel
         
-        # --- WORKER DROPDOWN ---
-        w_select = st.selectbox("Worker Name", ["-- Select Worker --", "➕ Add New Worker"] + workers)
-        worker = st.text_input("New Worker Name") if w_select == "➕ Add New Worker" else w_select
+        # WORKER
+        w_sel = st.selectbox("Worker Name", ["-- Select Worker --", "➕ Add New"] + workers)
+        worker = st.text_input("New Worker Name") if w_sel == "➕ Add New" else w_sel
 
-        # --- JOB CODE DROPDOWN ---
-        j_select = st.selectbox("Job Code", ["-- Select Job --", "➕ Add New Job"] + jobs)
-        job_code = st.text_input("New Job Code").upper() if j_select == "➕ Add New Job" else j_select
+        # JOB CODE
+        j_sel = st.selectbox("Job Code", ["-- Select Job --", "➕ Add New"] + jobs)
+        job_code = st.text_input("New Job Code").upper() if j_sel == "➕ Add New" else j_sel
 
     with col2:
+        # ACTIVITY (Now Dynamic)
+        a_sel = st.selectbox("Activity", ["-- Select Activity --", "➕ Add New Activity"] + activities)
+        activity = st.text_input("New Activity Name") if a_sel == "➕ Add New Activity" else a_sel
+        
         heat_no = st.text_input("Heat No / Plate No").upper()
-        activity = st.selectbox("Activity", ["Cutting (Plasma/Gas)", "Bending/Rolling", "Marking", "Fitting/Assembly", "Welding", "Grinding", "Sand Blasting", "Painting"])
         unit = st.selectbox("Unit", ["Meters (Mts)", "Components (Nos)", "Layouts (Nos)", "Joints/Points (Nos)", "Amount/Length (Mts)"])
         output = st.number_input("Output Value", min_value=0.0, step=0.1)
         hours = st.number_input("Hours Spent", min_value=0.0, step=0.5)
@@ -79,8 +82,9 @@ with st.form("production_form", clear_on_submit=True):
 
     if st.form_submit_button("🚀 Log Production & Sync"):
         # Validation
-        if any(v in [None, "", "-- Select Supervisor --", "-- Select Worker --", "-- Select Job --"] for v in [supervisor, worker, job_code]):
-            st.error("❌ Please select or enter Supervisor, Worker, and Job Code.")
+        invalid_selections = ["-- Select Supervisor --", "-- Select Worker --", "-- Select Job --", "-- Select Activity --", "", None]
+        if any(v in invalid_selections for v in [supervisor, worker, job_code, activity]):
+            st.error("❌ Please fill in all fields (Supervisor, Worker, Job, and Activity).")
         else:
             new_row = pd.DataFrame([{
                 "Timestamp": datetime.now(IST).strftime('%Y-%m-%d %H:%M'),
@@ -91,7 +95,7 @@ with st.form("production_form", clear_on_submit=True):
             df = pd.concat([df, new_row], ignore_index=True)
             df.to_csv(DB_FILE, index=False)
             if save_to_github(df):
-                st.success(f"✅ Entry for {job_code} saved permanently!")
+                st.success(f"✅ Success! {activity} for {job_code} saved.")
                 st.rerun()
 
 # --- 5. HISTORY ---
