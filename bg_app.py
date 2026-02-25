@@ -97,6 +97,64 @@ if os.path.exists(LOGS_FILE):
         st.dataframe(df_display, use_container_width=True)
         csv = df_view.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Excel Report", csv, "BG_Production_Report.csv")
+        # --- 5. MANAGEMENT & SUMMARY (PHASE 2) ---
+st.divider()
+st.header("📊 Management & Production Summary")
+
+if os.path.exists(LOGS_FILE):
+    # Reload data for fresh view
+    df_mngt = pd.read_csv(LOGS_FILE)
+    
+    # A. SEARCH & FILTER
+    st.subheader("🔍 Search Records")
+    col_s1, col_s2 = st.columns(2)
+    with col_s1:
+        search_job = st.multiselect("Filter by Job Code", options=df_mngt['Job_Code'].unique())
+    with col_s2:
+        search_worker = st.multiselect("Filter by Worker", options=df_mngt['Worker'].unique())
+
+    # Apply Filters
+    filtered_df = df_mngt.copy()
+    if search_job:
+        filtered_df = filtered_df[filtered_df['Job_Code'].isin(search_job)]
+    if search_worker:
+        filtered_df = filtered_df[filtered_df['Worker'].isin(search_worker)]
+
+    st.dataframe(filtered_df.sort_values(by="Timestamp", ascending=False), use_container_width=True)
+
+    # B. DELETE ACCIDENTAL ENTRIES
+    st.subheader("🗑️ Delete Incorrect Entry")
+    with st.expander("Click here to remove a record"):
+        if not filtered_df.empty:
+            # Create a unique list of rows to delete
+            delete_options = filtered_df['Timestamp'] + " | " + filtered_df['Job_Code'] + " | " + filtered_df['Activity']
+            to_delete = st.selectbox("Select the exact record to delete", delete_options)
+            
+            if st.button("❌ Confirm Delete Forever"):
+                # Remove the selected row from the main dataframe
+                # We split back the string to find the exact match
+                ts_del, job_del, act_del = to_delete.split(" | ")
+                df_mngt = df_mngt[~((df_mngt['Timestamp'] == ts_del) & 
+                                    (df_mngt['Job_Code'] == job_del) & 
+                                    (df_mngt['Activity'] == act_del))]
+                
+                # Save & Sync
+                df_mngt.to_csv(LOGS_FILE, index=False)
+                sync_to_github(LOGS_FILE)
+                st.error(f"Record for {job_del} deleted and synced.")
+                st.rerun()
+
+    # C. TOTAL PRODUCTION SUMMARIES
+    st.subheader("📈 Production Totals")
+    summary_type = st.radio("View Totals By:", ["Job Code", "Worker", "Activity"], horizontal=True)
+    
+    # Calculate Sums
+    summary_df = df_mngt.groupby(summary_type).agg({'Output': 'sum', 'Hours': 'sum'}).reset_index()
+    st.table(summary_df)
+
+else:
+    st.info("Start logging data to see summaries.")
+
 
 
 
