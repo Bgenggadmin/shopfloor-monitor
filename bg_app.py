@@ -47,7 +47,7 @@ def load_list(file_path, defaults):
 st.set_page_config(page_title="B&G Production", layout="wide")
 st.title("🏗️ B&G Production & Progress Tracker")
 
-workers = load_list(WORKERS_FILE, ["Prasanth", "RamaSai", "Subodth", "Naresh", "Ravindra"])
+workers = load_list(WORKERS_FILE, ["Prasanth", "RamaSai",  "Subodth", "Sunil", "Naresh",  "Ravindra"])
 job_list = load_list(JOBS_FILE, ["SSR501", "SSR502", "VESSEL-101"])
 
 # --- 3. ENTRY FORM (FIXED LIVE UNIT UPDATING) ---
@@ -97,4 +97,5 @@ if os.path.exists(LOGS_FILE):
         st.dataframe(df_display, use_container_width=True)
         csv = df_view.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Excel Report", csv, "BG_Production_Report.csv")
+
 
