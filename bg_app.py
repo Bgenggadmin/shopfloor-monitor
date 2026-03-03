@@ -5,103 +5,144 @@ import pytz
 import os
 from supabase import create_client, Client
 
-# --- 1. SETUP ---
+# --- 1. SETTINGS & CONNECTION ---
 IST = pytz.timezone('Asia/Kolkata')
+
+# Page Config
+st.set_page_config(page_title="B&G Production Master", layout="wide", page_icon="🏗️")
 
 try:
     URL = st.secrets["SUPABASE_URL"]
     KEY = st.secrets["SUPABASE_KEY"]
     supabase: Client = create_client(URL, KEY)
 except Exception:
-    st.error("❌ Secrets missing! Add SUPABASE_URL and SUPABASE_KEY to Settings > Secrets.")
+    st.error("❌ Secrets missing! Please add SUPABASE_URL and SUPABASE_KEY in Streamlit Settings > Secrets.")
     st.stop()
 
-st.set_page_config(page_title="B&G Production Master", layout="wide", page_icon="🏗️")
-
-# --- 2. DATA MIGRATION TOOL (Smart Date Parsing) ---
-with st.expander("🛠️ OLD DATA IMPORT TOOL (Smart Format Fix)"):
-    st.write("This tool automatically detects and fixes your date formats.")
-    if st.button("🚀 Start Migration"):
-        if os.path.exists("production_logs.csv"):
-            try:
-                # 1. Load CSV
-                old_df = pd.read_csv("production_logs.csv")
-                
-                # 2. CLEANUP: Fix Blanks/NaN
-                old_df['Output'] = old_df['Output'].fillna(0.0)
-                old_df['Hours'] = old_df['Hours'].fillna(0.0)
-                old_df['Notes'] = old_df['Notes'].fillna("")
-
-                # 3. DATE FIX: Use 'mixed' format to handle all variations
-                if 'Timestamp' in old_df.columns:
-                    # dayfirst=True ensures 02-03 is read as March 2nd, not Feb 3rd
-                    old_df['created_at'] = pd.to_datetime(
-                        old_df['Timestamp'], 
-                        dayfirst=True, 
-                        format='mixed'
-                    ).dt.strftime('%Y-%m-%d %H:%M:%S')
-                    
-                    old_df = old_df.drop(columns=['Timestamp'])
-
-                # 4. UPLOAD
-                data_to_import = old_df.to_dict(orient='records')
-                
-                batch_size = 50
-                for i in range(0, len(data_to_import), batch_size):
-                    batch = data_to_import[i:i + batch_size]
-                    supabase.table("production").insert(batch).execute()
-                
-                st.success(f"✅ Success! Migrated {len(data_to_import)} records.")
-                st.balloons()
-                st.rerun()
-            except Exception as e:
-                st.error(f"Migration Error: {e}")
-        else:
-            st.error("File 'production_logs.csv' not found.")
-# --- 3. DATABASE LOADING ---
+# --- 2. DATA LOADING FUNCTION ---
 def load_data():
     try:
-        # We fetch data sorted by created_at so newest is on top
+        # Fetch data sorted by time so newest is always at the top
         response = supabase.table("production").select("*").order("created_at", ascending=False).execute()
         if response.data:
             return pd.DataFrame(response.data)
         return pd.DataFrame(columns=["id", "created_at", "Supervisor", "Worker", "Job_Code", "Activity", "Unit", "Output", "Hours", "Notes"])
-    except:
+    except Exception as e:
+        st.error(f"Database Error: {e}")
         return pd.DataFrame()
 
 df = load_data()
 
-# --- 4. PRODUCTION FORM ---
-# --- 4. DATA LOADING & DROPDOWNS ---
-df = load_data()
-
-# 1. Supervisors: Start with your master list, then add any new ones found in DB
+# --- 3. MASTER DROPDOWN LISTS ---
+# These lists stay even if the database is empty
 master_supervisors = ["RamaSai", "Ravindra", "Subodth", "Prasanth", "SUNIL"]
-db_supervisors = df["Supervisor"].dropna().unique().tolist() if not df.empty else []
-st.session_state.p_supervisors = sorted(list(set(master_supervisors + db_supervisors)))
+master_activities = ["Cutting (Plasma/Gas)", "CNC CUTTING", "Bending/Rolling", "Marking", "Fitting/Assembly", "Welding", "Grinding"]
 
-# 2. Workers: Start empty and grow based on DB records
-st.session_state.p_workers = sorted(df["Worker"].dropna().unique().tolist()) if not df.empty else []
+# These lists grow automatically based on what has been entered in the past
+db_workers = sorted(df["Worker"].dropna().unique().tolist()) if not df.empty else []
+db_jobs = sorted(df["Job_Code"].dropna().unique().tolist()) if not df.empty else []
 
-# 3. Job Codes: Start empty and grow based on DB records
-st.session_state.p_jobs = sorted(df["Job_Code"].dropna().unique().tolist()) if not df.empty else []
+# --- 4. DATA MIGRATION TOOL (Admin Section) ---
+with st.expander("🛠️ DATA MIGRATION (Move CSV to Cloud)"):
+    st.info("Use this to move old records from production_logs.csv into the new system.")
+    if st.button("🚀 Start Migration Now"):
+        if os.path.exists("production_logs.csv"):
+            try:
+                old_df = pd.read_csv("production_logs.csv")
+                
+                # Fill empty values to prevent JSON errors
+                old_df['Output'] = old_df['Output'].fillna(0.0)
+                old_df['Hours'] = old_df['Hours'].fillna(0.0)
+                old_df['Notes'] = old_df['Notes'].fillna("")
 
-# 4. Activities: Hardcoded master list
-st.session_state.p_activities = ["Cutting (Plasma/Gas)", "CNC CUTTING", "Bending/Rolling", "Marking", "Fitting/Assembly", "Welding", "Grinding"]
+                # Fix Date Format: Convert DD-MM-YYYY to YYYY-MM-DD
+                if 'Timestamp' in old_df.columns:
+                    old_df['created_at'] = pd.to_datetime(
+                        old_df['Timestamp'], dayfirst=True, format='mixed'
+                    ).dt.strftime('%Y-%m-%d %H:%M:%S')
+                    old_df = old_df.drop(columns=['Timestamp'])
 
-# --- 5. HISTORY & SUMMARY ---
-st.divider()
+                data_records = old_df.to_dict(orient='records')
+                
+                # Upload in batches of 50
+                for i in range(0, len(data_records), 50):
+                    batch = data_records[i:i + 50]
+                    supabase.table("production").insert(batch).execute()
+                
+                st.success(f"✅ Successfully migrated {len(data_records)} records!")
+                st.balloons()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Migration failed: {e}")
+        else:
+            st.error("Could not find 'production_logs.csv' in the main folder.")
+
+# --- 5. MAIN UI & FORM ---
+st.title("🏗️ B&G Production Master")
+
+# Top Summary Metrics
 if not df.empty:
-    m1, m2 = st.columns(2)
-    m1.metric("Total Hours", f"{df['Hours'].sum():.1f}")
-    m2.metric("Entries Today", len(df))
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Total Logs", len(df))
+    m2.metric("Total Man-Hours", f"{df['Hours'].sum():.1f} Hrs")
+    m3.metric("Unique Jobs", df['Job_Code'].nunique())
+
+st.divider()
+
+# Production Entry Form
+with st.form("entry_form", clear_on_submit=True):
+    c1, c2 = st.columns(2)
     
-    st.subheader("📋 Production History (Sorted by Time)")
-    # Reformat for display to look nice: DD-MM-YYYY HH:MM
+    with c1:
+        sup = st.selectbox("Supervisor", ["-- Select --"] + master_supervisors)
+        # Use existing workers + option to type new
+        wrk = st.selectbox("Worker Name", ["-- Select --"] + db_workers + ["[ADD NEW]"])
+        if wrk == "[ADD NEW]":
+            wrk = st.text_input("Enter New Worker Name")
+            
+        jb = st.selectbox("Job Code", ["-- Select --"] + db_jobs + ["[ADD NEW]"])
+        if jb == "[ADD NEW]":
+            jb = st.text_input("Enter New Job Code")
+            
+        act = st.selectbox("Activity", ["-- Select --"] + master_activities)
+
+    with c2:
+        unt = st.selectbox("Unit", ["Meters (Mts)", "Components (Nos)", "Layouts (Nos)", "Joints/Points (Nos)", "Amount/Length (Mts)"])
+        out = st.number_input("Output Value", min_value=0.0, step=0.1)
+        hrs = st.number_input("Hours Spent", min_value=0.0, step=0.5)
+        nts = st.text_area("Notes / Activity Details")
+
+    if st.form_submit_button("💾 Save Production Log"):
+        if any(x in ["-- Select --", "", None] for x in [sup, wrk, jb, act]):
+            st.warning("⚠️ Please fill in all required fields.")
+        else:
+            new_log = {
+                "created_at": datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S'),
+                "Supervisor": sup,
+                "Worker": wrk,
+                "Job_Code": jb,
+                "Activity": act,
+                "Unit": unt,
+                "Output": float(out),
+                "Hours": float(hrs),
+                "Notes": nts
+            }
+            try:
+                supabase.table("production").insert(new_log).execute()
+                st.success("✅ Logged to Cloud!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Save failed: {e}")
+
+# --- 6. HISTORY TABLE ---
+st.subheader("📋 Recent Production History")
+if not df.empty:
+    # Formatting for display: Convert back to DD-MM-YYYY
     display_df = df.copy()
     display_df['created_at'] = pd.to_datetime(display_df['created_at']).dt.strftime('%d-%m-%Y %H:%M')
     display_df = display_df.rename(columns={'created_at': 'Timestamp'})
     
+    # Hide the ID column from the user
     st.dataframe(display_df.drop(columns=['id']), use_container_width=True)
-
-
+else:
+    st.info("No data found in the cloud yet. Try running the Migration tool above.")
