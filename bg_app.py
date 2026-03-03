@@ -20,7 +20,6 @@ except Exception:
 # --- 2. DATABASE FUNCTIONS ---
 def load_data():
     try:
-        # Fetching data sorted by time
         response = supabase.table("production").select("*").order("created_at", desc=True).execute()
         if response.data:
             return pd.DataFrame(response.data)
@@ -42,9 +41,8 @@ if not df.empty:
     all_supervisors = sorted(list(set(base_supervisors + df["Supervisor"].dropna().unique().tolist())))
     all_workers = sorted(df["Worker"].dropna().unique().tolist())
     all_jobs = sorted(df["Job_Code"].dropna().unique().tolist())
-    # Remove system placeholders from dropdowns
-    all_workers = [w for w in all_workers if w != "N/A"]
-    all_jobs = [j for j in all_jobs if j != "N/A"]
+    all_workers = [w for w in all_workers if w not in ["N/A", ""]]
+    all_jobs = [j for j in all_jobs if j not in ["N/A", ""]]
 else:
     all_supervisors = sorted(base_supervisors)
     all_workers, all_jobs = [], []
@@ -82,50 +80,52 @@ if menu == "Production Entry":
 
     st.divider()
     
-    # --- RECENT LOGS TABLE (ALL FIELDS) ---
-    st.subheader("📋 Recent Production History")
+    # --- RECENT LOGS TABLE ---
+    st.subheader("📋 Production History")
     if not df.empty:
-        # Filter out system placeholders for the table view
+        # Filter out system placeholders
         display_df = df[df['Notes'] != "SYSTEM_NEW_ITEM"].copy()
-        
-        # Formatting for readability
         display_df['created_at'] = pd.to_datetime(display_df['created_at']).dt.strftime('%d-%m-%Y %H:%M')
-        display_df = display_df.rename(columns={'created_at': 'Timestamp'})
+        display_df = display_df.rename(columns={'created_at': 'Timestamp', 'id': 'ID'})
         
-        # Show the table
-        st.dataframe(display_df.drop(columns=['id']), use_container_width=True)
+        # We put ID first so you can see which number to delete
+        cols = ['ID', 'Timestamp', 'Supervisor', 'Worker', 'Job_Code', 'Activity', 'Unit', 'Output', 'Hours', 'Notes']
+        st.dataframe(display_df[cols], use_container_width=True)
         
         # DELETE SECTION
-        with st.expander("🗑️ Delete Accidental Entries"):
-            st.warning("Select an entry ID to delete it permanently.")
-            delete_id = st.selectbox("Select ID to Delete", ["-- Select --"] + display_df['id'].tolist())
-            if st.button("Confirm Delete"):
-                if delete_id != "-- Select --":
-                    supabase.table("production").delete().eq("id", delete_id).execute()
-                    st.success(f"Entry {delete_id} deleted!")
+        st.markdown("### 🗑️ Delete an Entry")
+        col_del1, col_del2 = st.columns([2, 1])
+        with col_del1:
+            # Dropdown shows the ID and the Job Code so you pick the right one
+            delete_options = display_df.apply(lambda x: f"ID: {x['ID']} | Job: {x['Job_Code']} | Worker: {x['Worker']}", axis=1).tolist()
+            to_delete = st.selectbox("Select entry to delete:", ["-- Select --"] + delete_options)
+        
+        with col_del2:
+            st.write(" ") # Spacing
+            if st.button("🗑️ Permanently Delete"):
+                if to_delete != "-- Select --":
+                    # Extract the ID number from the string
+                    selected_id = int(to_delete.split("|")[0].replace("ID: ", "").strip())
+                    supabase.table("production").delete().eq("id", selected_id).execute()
+                    st.success(f"Entry {selected_id} deleted!")
                     st.rerun()
 
 # --- PAGE 2: MANAGE LISTS ---
 elif menu == "Manage Lists (Add New)":
-    st.title("🗂️ Add New Items to Dropdowns")
-    st.info("Added items will show up in the 'Production Entry' dropdowns immediately.")
-    
+    st.title("🗂️ Add New Items")
     c1, c2, c3 = st.columns(3)
-    
     with c1:
         new_s = st.text_input("New Supervisor")
         if st.button("Add Supervisor") and new_s:
             supabase.table("production").insert({"Supervisor": new_s, "Notes": "SYSTEM_NEW_ITEM", "Job_Code": "N/A", "Worker": "N/A"}).execute()
             st.success(f"Added {new_s}!")
             st.rerun()
-
     with c2:
         new_j = st.text_input("New Job Code")
         if st.button("Add Job Code") and new_j:
             supabase.table("production").insert({"Job_Code": new_j, "Notes": "SYSTEM_NEW_ITEM", "Supervisor": "N/A", "Worker": "N/A"}).execute()
             st.success(f"Added {new_j}!")
             st.rerun()
-            
     with c3:
         new_w = st.text_input("New Worker")
         if st.button("Add Worker") and new_w:
