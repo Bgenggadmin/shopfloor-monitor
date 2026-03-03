@@ -18,41 +18,46 @@ except Exception:
 
 st.set_page_config(page_title="B&G Production Master", layout="wide", page_icon="🏗️")
 
-# --- 2. DATA MIGRATION TOOL (Fixed Date/Time Parsing) ---
-with st.expander("🛠️ OLD DATA IMPORT TOOL (Fixed Time/Date)"):
-    st.write("This tool fixes your Date format (DD-MM-YYYY) to match the Cloud Database.")
+# --- 2. DATA MIGRATION TOOL (Smart Date Parsing) ---
+with st.expander("🛠️ OLD DATA IMPORT TOOL (Smart Format Fix)"):
+    st.write("This tool automatically detects and fixes your date formats.")
     if st.button("🚀 Start Migration"):
         if os.path.exists("production_logs.csv"):
             try:
-                # Load CSV
+                # 1. Load CSV
                 old_df = pd.read_csv("production_logs.csv")
                 
-                # CLEANUP: Fix Blanks
+                # 2. CLEANUP: Fix Blanks/NaN
                 old_df['Output'] = old_df['Output'].fillna(0.0)
                 old_df['Hours'] = old_df['Hours'].fillna(0.0)
                 old_df['Notes'] = old_df['Notes'].fillna("")
 
-                # DATE FIX: Convert '25-02-2026 10:03' to Database Format
-                # We tell pandas exactly what your old format looks like: day-month-year hour:minute
+                # 3. DATE FIX: Use 'mixed' format to handle all variations
                 if 'Timestamp' in old_df.columns:
-                    old_df['created_at'] = pd.to_datetime(old_df['Timestamp'], format='%d-%m-%Y %H:%M').dt.strftime('%Y-%m-%d %H:%M:%S')
+                    # dayfirst=True ensures 02-03 is read as March 2nd, not Feb 3rd
+                    old_df['created_at'] = pd.to_datetime(
+                        old_df['Timestamp'], 
+                        dayfirst=True, 
+                        format='mixed'
+                    ).dt.strftime('%Y-%m-%d %H:%M:%S')
+                    
                     old_df = old_df.drop(columns=['Timestamp'])
 
+                # 4. UPLOAD
                 data_to_import = old_df.to_dict(orient='records')
                 
-                # Upload
                 batch_size = 50
                 for i in range(0, len(data_to_import), batch_size):
                     batch = data_to_import[i:i + batch_size]
                     supabase.table("production").insert(batch).execute()
                 
-                st.success(f"✅ Migrated {len(data_to_import)} records with correct Date & Time!")
+                st.success(f"✅ Success! Migrated {len(data_to_import)} records.")
+                st.balloons()
                 st.rerun()
             except Exception as e:
                 st.error(f"Migration Error: {e}")
         else:
             st.error("File 'production_logs.csv' not found.")
-
 # --- 3. DATABASE LOADING ---
 def load_data():
     try:
@@ -122,3 +127,4 @@ if not df.empty:
     display_df = display_df.rename(columns={'created_at': 'Timestamp'})
     
     st.dataframe(display_df.drop(columns=['id']), use_container_width=True)
+
