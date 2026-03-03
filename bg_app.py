@@ -33,18 +33,25 @@ df = load_data()
 st.sidebar.title("🛠️ Admin Menu")
 menu = st.sidebar.radio("Go to:", ["Production Entry", "Manage Lists (Add New)", "Migration Tool"])
 
-# --- 4. DROPDOWN LOGIC ---
+# --- 4. DROPDOWN LOGIC (UPDATED TO INCLUDE DYNAMIC ACTIVITIES) ---
 base_supervisors = ["RamaSai", "Ravindra", "Subodth", "Prasanth", "SUNIL"]
-base_activities = ["Cutting (Plasma/Gas)", "CNC CUTTING", "Bending/Rolling", "Marking", "Fitting/Assembly", "Welding", "Grinding"]
+# These are your standard activities
+default_activities = ["Cutting (Plasma/Gas)", "CNC CUTTING", "Bending/Rolling", "Marking", "Fitting/Assembly", "Welding", "Grinding"]
 
 if not df.empty:
     all_supervisors = sorted(list(set(base_supervisors + df["Supervisor"].dropna().unique().tolist())))
-    all_workers = sorted(df["Worker"].dropna().unique().tolist())
-    all_jobs = sorted(df["Job_Code"].dropna().unique().tolist())
-    all_workers = [w for w in all_workers if w not in ["N/A", ""]]
-    all_jobs = [j for j in all_jobs if j not in ["N/A", ""]]
+    all_workers = sorted([w for w in df["Worker"].dropna().unique().tolist() if w not in ["N/A", ""]])
+    all_jobs = sorted([j for j in df["Job_Code"].dropna().unique().tolist() if j not in ["N/A", ""]])
+    
+    # NEW: Fetch activities from DB and merge with defaults
+    db_activities = [a for a in df["Activity"].dropna().unique().tolist() if a not in ["N/A", ""]]
+    all_activities = sorted(list(set(default_activities + db_activities)))
+    
+    # Clean lists of system placeholders
+    all_supervisors = [s for s in all_supervisors if s not in ["N/A", ""]]
 else:
     all_supervisors = sorted(base_supervisors)
+    all_activities = sorted(default_activities)
     all_workers, all_jobs = [], []
 
 # --- PAGE 1: PRODUCTION ENTRY ---
@@ -57,7 +64,7 @@ if menu == "Production Entry":
             sup = st.selectbox("Supervisor", ["-- Select --"] + all_supervisors)
             wrk = st.selectbox("Worker Name", ["-- Select --"] + all_workers)
             jb = st.selectbox("Job Code", ["-- Select --"] + all_jobs)
-            act = st.selectbox("Activity", ["-- Select --"] + base_activities)
+            act = st.selectbox("Activity", ["-- Select --"] + all_activities) # Updated to use all_activities
         with col2:
             unt = st.selectbox("Unit", ["Meters (Mts)", "Components (Nos)", "Layouts (Nos)", "Joints/Points (Nos)"])
             out = st.number_input("Output Value", min_value=0.0)
@@ -83,12 +90,10 @@ if menu == "Production Entry":
     # --- RECENT LOGS TABLE ---
     st.subheader("📋 Production History")
     if not df.empty:
-        # Filter out system placeholders
         display_df = df[df['Notes'] != "SYSTEM_NEW_ITEM"].copy()
         display_df['created_at'] = pd.to_datetime(display_df['created_at']).dt.strftime('%d-%m-%Y %H:%M')
         display_df = display_df.rename(columns={'created_at': 'Timestamp', 'id': 'ID'})
         
-        # We put ID first so you can see which number to delete
         cols = ['ID', 'Timestamp', 'Supervisor', 'Worker', 'Job_Code', 'Activity', 'Unit', 'Output', 'Hours', 'Notes']
         st.dataframe(display_df[cols], use_container_width=True)
         
@@ -96,41 +101,47 @@ if menu == "Production Entry":
         st.markdown("### 🗑️ Delete an Entry")
         col_del1, col_del2 = st.columns([2, 1])
         with col_del1:
-            # Dropdown shows the ID and the Job Code so you pick the right one
             delete_options = display_df.apply(lambda x: f"ID: {x['ID']} | Job: {x['Job_Code']} | Worker: {x['Worker']}", axis=1).tolist()
             to_delete = st.selectbox("Select entry to delete:", ["-- Select --"] + delete_options)
         
         with col_del2:
-            st.write(" ") # Spacing
+            st.write(" ") 
             if st.button("🗑️ Permanently Delete"):
                 if to_delete != "-- Select --":
-                    # Extract the ID number from the string
                     selected_id = int(to_delete.split("|")[0].replace("ID: ", "").strip())
                     supabase.table("production").delete().eq("id", selected_id).execute()
                     st.success(f"Entry {selected_id} deleted!")
                     st.rerun()
 
-# --- PAGE 2: MANAGE LISTS ---
+# --- PAGE 2: MANAGE LISTS (UPDATED WITH ACTIVITY) ---
 elif menu == "Manage Lists (Add New)":
     st.title("🗂️ Add New Items")
-    c1, c2, c3 = st.columns(3)
+    c1, c2 = st.columns(2)
+    c3, c4 = st.columns(2) # Added second row for Activity
+    
     with c1:
         new_s = st.text_input("New Supervisor")
         if st.button("Add Supervisor") and new_s:
-            supabase.table("production").insert({"Supervisor": new_s, "Notes": "SYSTEM_NEW_ITEM", "Job_Code": "N/A", "Worker": "N/A"}).execute()
+            supabase.table("production").insert({"Supervisor": new_s, "Notes": "SYSTEM_NEW_ITEM", "Job_Code": "N/A", "Worker": "N/A", "Activity": "N/A"}).execute()
             st.success(f"Added {new_s}!")
             st.rerun()
     with c2:
         new_j = st.text_input("New Job Code")
         if st.button("Add Job Code") and new_j:
-            supabase.table("production").insert({"Job_Code": new_j, "Notes": "SYSTEM_NEW_ITEM", "Supervisor": "N/A", "Worker": "N/A"}).execute()
+            supabase.table("production").insert({"Job_Code": new_j, "Notes": "SYSTEM_NEW_ITEM", "Supervisor": "N/A", "Worker": "N/A", "Activity": "N/A"}).execute()
             st.success(f"Added {new_j}!")
             st.rerun()
     with c3:
         new_w = st.text_input("New Worker")
         if st.button("Add Worker") and new_w:
-            supabase.table("production").insert({"Worker": new_w, "Notes": "SYSTEM_NEW_ITEM", "Supervisor": "N/A", "Job_Code": "N/A"}).execute()
+            supabase.table("production").insert({"Worker": new_w, "Notes": "SYSTEM_NEW_ITEM", "Supervisor": "N/A", "Job_Code": "N/A", "Activity": "N/A"}).execute()
             st.success(f"Added {new_w}!")
+            st.rerun()
+    with c4:
+        new_act = st.text_input("New Activity")
+        if st.button("Add Activity") and new_act:
+            supabase.table("production").insert({"Activity": new_act, "Notes": "SYSTEM_NEW_ITEM", "Supervisor": "N/A", "Job_Code": "N/A", "Worker": "N/A"}).execute()
+            st.success(f"Added {new_act}!")
             st.rerun()
 
 # --- PAGE 3: MIGRATION ---
