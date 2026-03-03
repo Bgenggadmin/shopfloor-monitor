@@ -19,20 +19,39 @@ except Exception:
 st.set_page_config(page_title="B&G Production Master", layout="wide", page_icon="🏗️")
 
 # --- 2. DATA MIGRATION TOOL (Inside Expander) ---
+# --- 2. DATA MIGRATION TOOL (Inside Expander) ---
 with st.expander("🛠️ OLD DATA IMPORT TOOL (Run once)"):
     st.write("Click this to move your 'production_logs.csv' data to the cloud.")
     if st.button("🚀 Start Migration"):
         if os.path.exists("production_logs.csv"):
-            old_df = pd.read_csv("production_logs.csv")
-            # This fixes the "Timestamp" vs "created_at" error you saw
-            # It renames the column to match Supabase's default
-            old_df = old_df.rename(columns={'Timestamp': 'created_at'})
-            data_to_import = old_df.to_dict(orient='records')
             try:
-                supabase.table("production").insert(data_to_import).execute()
-                st.success("✅ Old data successfully moved to Supabase!")
+                # 1. Load the CSV
+                old_df = pd.read_csv("production_logs.csv")
+                
+                # 2. CLEANUP: Fix the "NaN" error
+                # This replaces all empty/blank cells with 0.0 for numbers 
+                # and empty strings for text so Supabase doesn't crash.
+                old_df['Output'] = old_df['Output'].fillna(0.0)
+                old_df['Hours'] = old_df['Hours'].fillna(0.0)
+                old_df['Notes'] = old_df['Notes'].fillna("")
+                
+                # 3. RENAME: Fix the Timestamp error
+                if 'Timestamp' in old_df.columns:
+                    old_df = old_df.rename(columns={'Timestamp': 'created_at'})
+                
+                # 4. CONVERT & UPLOAD
+                data_to_import = old_df.to_dict(orient='records')
+                
+                # We send data in smaller chunks (batches) to prevent timeouts
+                batch_size = 50
+                for i in range(0, len(data_to_import), batch_size):
+                    batch = data_to_import[i:i + batch_size]
+                    supabase.table("production").insert(batch).execute()
+                
+                st.success(f"✅ Success! {len(data_to_import)} rows moved to Supabase.")
+                st.balloons()
             except Exception as e:
-                st.error(f"Migration Error: {e}. Check if column names in Supabase match the CSV.")
+                st.error(f"Migration Error: {e}")
         else:
             st.error("File 'production_logs.csv' not found in GitHub.")
 
@@ -105,3 +124,4 @@ if not df.empty:
     st.subheader("📋 Recent Production Logs")
     # We use 'created_at' instead of 'Timestamp' to match Supabase
     st.dataframe(df.sort_values(by="id", ascending=False).head(20), use_container_width=True)
+
