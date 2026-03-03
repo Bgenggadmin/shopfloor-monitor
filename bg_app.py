@@ -18,44 +18,39 @@ except Exception:
 
 st.set_page_config(page_title="B&G Production Master", layout="wide", page_icon="🏗️")
 
-# --- 2. DATA MIGRATION TOOL (Inside Expander) ---
-# --- 2. DATA MIGRATION TOOL (Inside Expander) ---
-with st.expander("🛠️ OLD DATA IMPORT TOOL (Run once)"):
-    st.write("Click this to move your 'production_logs.csv' data to the cloud.")
+# --- 2. DATA MIGRATION TOOL (With Time & NaN Fix) ---
+with st.expander("🛠️ OLD DATA IMPORT TOOL"):
+    st.write("Click this to move your 'production_logs.csv' data to Supabase.")
     if st.button("🚀 Start Migration"):
         if os.path.exists("production_logs.csv"):
             try:
-                # 1. Load the CSV
                 old_df = pd.read_csv("production_logs.csv")
                 
-                # 2. CLEANUP: Fix the "NaN" error
-                # This replaces all empty/blank cells with 0.0 for numbers 
-                # and empty strings for text so Supabase doesn't crash.
+                # CLEANUP: Fix blanks/NaN so they don't crash JSON
                 old_df['Output'] = old_df['Output'].fillna(0.0)
                 old_df['Hours'] = old_df['Hours'].fillna(0.0)
                 old_df['Notes'] = old_df['Notes'].fillna("")
                 
-                # 3. RENAME: Fix the Timestamp error
+                # TIME FIX: Map CSV 'Timestamp' to Supabase 'created_at'
                 if 'Timestamp' in old_df.columns:
                     old_df = old_df.rename(columns={'Timestamp': 'created_at'})
                 
-                # 4. CONVERT & UPLOAD
                 data_to_import = old_df.to_dict(orient='records')
                 
-                # We send data in smaller chunks (batches) to prevent timeouts
+                # Upload in batches
                 batch_size = 50
                 for i in range(0, len(data_to_import), batch_size):
                     batch = data_to_import[i:i + batch_size]
                     supabase.table("production").insert(batch).execute()
                 
-                st.success(f"✅ Success! {len(data_to_import)} rows moved to Supabase.")
-                st.balloons()
+                st.success(f"✅ Migrated {len(data_to_import)} records with original timestamps!")
+                st.rerun()
             except Exception as e:
                 st.error(f"Migration Error: {e}")
         else:
-            st.error("File 'production_logs.csv' not found in GitHub.")
+            st.error("File 'production_logs.csv' not found.")
 
-# --- 3. DATABASE FUNCTIONS ---
+# --- 3. DATABASE LOADING ---
 def load_data():
     try:
         response = supabase.table("production").select("*").execute()
@@ -65,9 +60,9 @@ def load_data():
     except:
         return pd.DataFrame()
 
-# --- 4. DATA LOADING & DROPDOWNS ---
 df = load_data()
 
+# --- 4. DYNAMIC DROPDOWNS ---
 if 'p_supervisors' not in st.session_state:
     st.session_state.p_supervisors = sorted(df["Supervisor"].dropna().unique().tolist()) if not df.empty else ["RamaSai", "Ravindra", "Subodth", "Prasanth"]
 if 'p_workers' not in st.session_state:
@@ -77,9 +72,22 @@ if 'p_jobs' not in st.session_state:
 if 'p_activities' not in st.session_state:
     st.session_state.p_activities = sorted(df["Activity"].dropna().unique().tolist()) if not df.empty else ["Cutting (Plasma/Gas)", "Bending/Rolling", "Marking", "Fitting/Assembly", "Welding", "Grinding"]
 
-# --- 5. PRODUCTION FORM ---
+# --- 5. LOG SUMMARY SECTION ---
 st.title("🏗️ B&G Production Master")
+if not df.empty:
+    st.subheader("📊 Production Summary")
+    s1, s2, s3, s4 = st.columns(4)
+    with s1:
+        st.metric("Total Logs", len(df))
+    with s2:
+        st.metric("Total Hours Spent", f"{df['Hours'].sum():.1f} Hrs")
+    with s3:
+        st.metric("Active Job Codes", df['Job_Code'].nunique())
+    with s4:
+        st.metric("Unique Workers", df['Worker'].nunique())
+st.divider()
 
+# --- 6. MAIN PRODUCTION FORM ---
 with st.form("production_form", clear_on_submit=True):
     col1, col2 = st.columns(2)
     with col1:
@@ -99,29 +107,20 @@ with st.form("production_form", clear_on_submit=True):
         else:
             new_entry = {
                 "created_at": datetime.now(IST).strftime('%Y-%m-%d %H:%M'),
-                "Supervisor": supervisor,
-                "Worker": worker,
-                "Job_Code": job_code,
-                "Activity": activity,
-                "Unit": unit,
-                "Output": float(output),
-                "Hours": float(hours),
-                "Notes": notes
+                "Supervisor": supervisor, "Worker": worker, "Job_Code": job_code,
+                "Activity": activity, "Unit": unit, "Output": float(output),
+                "Hours": float(hours), "Notes": notes
             }
             try:
                 supabase.table("production").insert(new_entry).execute()
                 st.success("✅ Logged Successfully!")
                 st.rerun()
             except Exception as e:
-                st.error(f"Error: {e}")
+                st.error(f"Sync Error: {e}")
 
-# --- 6. SUMMARY & HISTORY ---
-st.divider()
+# --- 7. HISTORY ---
+st.subheader("📋 Recent Production Logs")
 if not df.empty:
-    m1, m2 = st.columns(2)
-    m1.metric("Total Hours", f"{df['Hours'].sum():.1f}")
-    m2.metric("Total Logs", len(df))
-    st.subheader("📋 Recent Production Logs")
-    # We use 'created_at' instead of 'Timestamp' to match Supabase
-    st.dataframe(df.sort_values(by="id", ascending=False).head(20), use_container_width=True)
-
+    # Rename 'created_at' back to 'Timestamp' for display so it looks like the old app
+    display_df = df.rename(columns={'created_at': 'Timestamp'})
+    st.dataframe(display_df.sort_values(by="id", ascending=False).head(30), use_container_width=True)
