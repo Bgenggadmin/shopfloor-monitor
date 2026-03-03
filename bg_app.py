@@ -18,32 +18,35 @@ except Exception:
 
 st.set_page_config(page_title="B&G Production Master", layout="wide", page_icon="🏗️")
 
-# --- 2. DATA MIGRATION TOOL (With Time & NaN Fix) ---
-with st.expander("🛠️ OLD DATA IMPORT TOOL"):
-    st.write("Click this to move your 'production_logs.csv' data to Supabase.")
+# --- 2. DATA MIGRATION TOOL (Fixed Date/Time Parsing) ---
+with st.expander("🛠️ OLD DATA IMPORT TOOL (Fixed Time/Date)"):
+    st.write("This tool fixes your Date format (DD-MM-YYYY) to match the Cloud Database.")
     if st.button("🚀 Start Migration"):
         if os.path.exists("production_logs.csv"):
             try:
+                # Load CSV
                 old_df = pd.read_csv("production_logs.csv")
                 
-                # CLEANUP: Fix blanks/NaN so they don't crash JSON
+                # CLEANUP: Fix Blanks
                 old_df['Output'] = old_df['Output'].fillna(0.0)
                 old_df['Hours'] = old_df['Hours'].fillna(0.0)
                 old_df['Notes'] = old_df['Notes'].fillna("")
-                
-                # TIME FIX: Map CSV 'Timestamp' to Supabase 'created_at'
+
+                # DATE FIX: Convert '25-02-2026 10:03' to Database Format
+                # We tell pandas exactly what your old format looks like: day-month-year hour:minute
                 if 'Timestamp' in old_df.columns:
-                    old_df = old_df.rename(columns={'Timestamp': 'created_at'})
-                
+                    old_df['created_at'] = pd.to_datetime(old_df['Timestamp'], format='%d-%m-%Y %H:%M').dt.strftime('%Y-%m-%d %H:%M:%S')
+                    old_df = old_df.drop(columns=['Timestamp'])
+
                 data_to_import = old_df.to_dict(orient='records')
                 
-                # Upload in batches
+                # Upload
                 batch_size = 50
                 for i in range(0, len(data_to_import), batch_size):
                     batch = data_to_import[i:i + batch_size]
                     supabase.table("production").insert(batch).execute()
                 
-                st.success(f"✅ Migrated {len(data_to_import)} records with original timestamps!")
+                st.success(f"✅ Migrated {len(data_to_import)} records with correct Date & Time!")
                 st.rerun()
             except Exception as e:
                 st.error(f"Migration Error: {e}")
@@ -53,7 +56,8 @@ with st.expander("🛠️ OLD DATA IMPORT TOOL"):
 # --- 3. DATABASE LOADING ---
 def load_data():
     try:
-        response = supabase.table("production").select("*").execute()
+        # We fetch data sorted by created_at so newest is on top
+        response = supabase.table("production").select("*").order("created_at", ascending=False).execute()
         if response.data:
             return pd.DataFrame(response.data)
         return pd.DataFrame(columns=["id", "created_at", "Supervisor", "Worker", "Job_Code", "Activity", "Unit", "Output", "Hours", "Notes"])
@@ -62,65 +66,59 @@ def load_data():
 
 df = load_data()
 
-# --- 4. DYNAMIC DROPDOWNS ---
-if 'p_supervisors' not in st.session_state:
-    st.session_state.p_supervisors = sorted(df["Supervisor"].dropna().unique().tolist()) if not df.empty else ["RamaSai", "Ravindra", "Subodth", "Prasanth"]
-if 'p_workers' not in st.session_state:
-    st.session_state.p_workers = sorted(df["Worker"].dropna().unique().tolist()) if not df.empty else []
-if 'p_jobs' not in st.session_state:
-    st.session_state.p_jobs = sorted(df["Job_Code"].dropna().unique().tolist()) if not df.empty else []
-if 'p_activities' not in st.session_state:
-    st.session_state.p_activities = sorted(df["Activity"].dropna().unique().tolist()) if not df.empty else ["Cutting (Plasma/Gas)", "Bending/Rolling", "Marking", "Fitting/Assembly", "Welding", "Grinding"]
-
-# --- 5. LOG SUMMARY SECTION ---
+# --- 4. PRODUCTION FORM ---
 st.title("🏗️ B&G Production Master")
-if not df.empty:
-    st.subheader("📊 Production Summary")
-    s1, s2, s3, s4 = st.columns(4)
-    with s1:
-        st.metric("Total Logs", len(df))
-    with s2:
-        st.metric("Total Hours Spent", f"{df['Hours'].sum():.1f} Hrs")
-    with s3:
-        st.metric("Active Job Codes", df['Job_Code'].nunique())
-    with s4:
-        st.metric("Unique Workers", df['Worker'].nunique())
-st.divider()
 
-# --- 6. MAIN PRODUCTION FORM ---
 with st.form("production_form", clear_on_submit=True):
     col1, col2 = st.columns(2)
     with col1:
-        supervisor = st.selectbox("Supervisor", ["-- Select --"] + st.session_state.p_supervisors)
-        worker = st.selectbox("Worker Name", ["-- Select --"] + st.session_state.p_workers)
-        job_code = st.selectbox("Job Code", ["-- Select --"] + st.session_state.p_jobs)
-        activity = st.selectbox("Activity", ["-- Select --"] + st.session_state.p_activities)
+        # We populate these from session state or unique values in DB
+        supervisors = sorted(df["Supervisor"].dropna().unique().tolist()) if not df.empty else ["RamaSai", "Ravindra"]
+        supervisor = st.selectbox("Supervisor", ["-- Select --"] + supervisors)
+        
+        workers = sorted(df["Worker"].dropna().unique().tolist()) if not df.empty else []
+        worker = st.selectbox("Worker Name", ["-- Select --"] + workers)
+        
+        jobs = sorted(df["Job_Code"].dropna().unique().tolist()) if not df.empty else []
+        job_code = st.selectbox("Job Code", ["-- Select --"] + jobs)
+        
+        activities = ["Cutting (Plasma/Gas)", "Bending/Rolling", "Marking", "Fitting/Assembly", "Welding", "Grinding"]
+        activity = st.selectbox("Activity", ["-- Select --"] + activities)
+    
     with col2:
-        unit = st.selectbox("Unit", ["Meters (Mts)", "Components (Nos)", "Layouts (Nos)", "Joints/Points (Nos)", "Amount/Length (Mts)"])
+        unit = st.selectbox("Unit", ["Meters (Mts)", "Components (Nos)", "Layouts (Nos)", "Joints/Points (Nos)"])
         output = st.number_input("Output Value", min_value=0.0, step=0.1)
         hours = st.number_input("Hours Spent", min_value=0.0, step=0.5)
-        notes = st.text_area("Activity Details / Consumables Used")
+        notes = st.text_area("Notes")
 
-    if st.form_submit_button("🚀 Log Production & Sync"):
+    if st.form_submit_button("🚀 Log Production"):
         if any(v == "-- Select --" for v in [supervisor, worker, job_code, activity]):
-            st.error("❌ Please select valid options.")
+            st.error("❌ Please select all fields.")
         else:
+            # THIS CAPTURES BOTH CURRENT DATE AND TIME
+            now_ist = datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')
+            
             new_entry = {
-                "created_at": datetime.now(IST).strftime('%Y-%m-%d %H:%M'),
+                "created_at": now_ist,
                 "Supervisor": supervisor, "Worker": worker, "Job_Code": job_code,
                 "Activity": activity, "Unit": unit, "Output": float(output),
                 "Hours": float(hours), "Notes": notes
             }
-            try:
-                supabase.table("production").insert(new_entry).execute()
-                st.success("✅ Logged Successfully!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Sync Error: {e}")
+            supabase.table("production").insert(new_entry).execute()
+            st.success("✅ Logged with Time!")
+            st.rerun()
 
-# --- 7. HISTORY ---
-st.subheader("📋 Recent Production Logs")
+# --- 5. HISTORY & SUMMARY ---
+st.divider()
 if not df.empty:
-    # Rename 'created_at' back to 'Timestamp' for display so it looks like the old app
-    display_df = df.rename(columns={'created_at': 'Timestamp'})
-    st.dataframe(display_df.sort_values(by="id", ascending=False).head(30), use_container_width=True)
+    m1, m2 = st.columns(2)
+    m1.metric("Total Hours", f"{df['Hours'].sum():.1f}")
+    m2.metric("Entries Today", len(df))
+    
+    st.subheader("📋 Production History (Sorted by Time)")
+    # Reformat for display to look nice: DD-MM-YYYY HH:MM
+    display_df = df.copy()
+    display_df['created_at'] = pd.to_datetime(display_df['created_at']).dt.strftime('%d-%m-%Y %H:%M')
+    display_df = display_df.rename(columns={'created_at': 'Timestamp'})
+    
+    st.dataframe(display_df.drop(columns=['id']), use_container_width=True)
