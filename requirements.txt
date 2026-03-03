@@ -3,3 +3,4 @@ pandas
 pytz
 PyGithub
 xlsxwriter
+supabase
