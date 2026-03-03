@@ -32,17 +32,19 @@ df = load_data()
 
 # --- 3. SIDEBAR NAVIGATION ---
 st.sidebar.title("🛠️ Admin Menu")
-menu = st.sidebar.radio("Go to:", ["Production Entry", "Manage Lists (Add/Delete)", "Migration Tool"])
+menu = st.sidebar.radio("Go to:", ["Production Entry", "Manage Lists (Add New)", "Migration Tool"])
 
 # --- 4. DROPDOWN LOGIC ---
 base_supervisors = ["RamaSai", "Ravindra", "Subodth", "Prasanth", "SUNIL"]
 base_activities = ["Cutting (Plasma/Gas)", "CNC CUTTING", "Bending/Rolling", "Marking", "Fitting/Assembly", "Welding", "Grinding"]
 
-# Extract lists from DB
 if not df.empty:
     all_supervisors = sorted(list(set(base_supervisors + df["Supervisor"].dropna().unique().tolist())))
     all_workers = sorted(df["Worker"].dropna().unique().tolist())
     all_jobs = sorted(df["Job_Code"].dropna().unique().tolist())
+    # Remove system placeholders from dropdowns
+    all_workers = [w for w in all_workers if w != "N/A"]
+    all_jobs = [j for j in all_jobs if j != "N/A"]
 else:
     all_supervisors = sorted(base_supervisors)
     all_workers, all_jobs = [], []
@@ -79,47 +81,55 @@ if menu == "Production Entry":
                 st.rerun()
 
     st.divider()
-    st.subheader("📋 Recent Logs")
+    
+    # --- RECENT LOGS TABLE (ALL FIELDS) ---
+    st.subheader("📋 Recent Production History")
     if not df.empty:
-        # Display with Delete Buttons
-        display_df = df.copy().head(20)
-        display_df['created_at'] = pd.to_datetime(display_df['created_at']).dt.strftime('%d-%m-%Y %H:%M')
+        # Filter out system placeholders for the table view
+        display_df = df[df['Notes'] != "SYSTEM_NEW_ITEM"].copy()
         
-        for index, row in display_df.iterrows():
-            with st.expander(f"Log: {row['Timestamp' if 'Timestamp' in row else 'created_at']} | {row['Job_Code']} | {row['Worker']}"):
-                col_a, col_b = st.columns([4, 1])
-                col_a.write(f"**Activity:** {row['Activity']} | **Output:** {row['Output']} {row['Unit']} | **Notes:** {row['Notes']}")
-                if col_b.button("🗑️ Delete", key=f"del_{row['id']}"):
-                    supabase.table("production").delete().eq("id", row['id']).execute()
-                    st.success("Entry Deleted!")
+        # Formatting for readability
+        display_df['created_at'] = pd.to_datetime(display_df['created_at']).dt.strftime('%d-%m-%Y %H:%M')
+        display_df = display_df.rename(columns={'created_at': 'Timestamp'})
+        
+        # Show the table
+        st.dataframe(display_df.drop(columns=['id']), use_container_width=True)
+        
+        # DELETE SECTION
+        with st.expander("🗑️ Delete Accidental Entries"):
+            st.warning("Select an entry ID to delete it permanently.")
+            delete_id = st.selectbox("Select ID to Delete", ["-- Select --"] + display_df['id'].tolist())
+            if st.button("Confirm Delete"):
+                if delete_id != "-- Select --":
+                    supabase.table("production").delete().eq("id", delete_id).execute()
+                    st.success(f"Entry {delete_id} deleted!")
                     st.rerun()
 
-# --- PAGE 2: MANAGE LISTS (DYNAMIC ADDING) ---
-elif menu == "Manage Lists (Add/Delete)":
-    st.title("🗂️ Manage App Lists")
-    st.info("Add new items here. They will immediately appear in the Production Entry dropdowns.")
+# --- PAGE 2: MANAGE LISTS ---
+elif menu == "Manage Lists (Add New)":
+    st.title("🗂️ Add New Items to Dropdowns")
+    st.info("Added items will show up in the 'Production Entry' dropdowns immediately.")
     
-    tab1, tab2, tab3 = st.tabs(["Add New Supervisor", "Add New Job Code", "Add New Worker"])
+    c1, c2, c3 = st.columns(3)
     
-    with tab1:
-        new_s = st.text_input("New Supervisor Name")
-        if st.button("Add Supervisor"):
-            # We create a dummy entry to register the name in the system
-            supabase.table("production").insert({"Supervisor": new_s, "Notes": "SYSTEM_NEW_SUP", "Job_Code": "N/A", "Worker": "N/A"}).execute()
+    with c1:
+        new_s = st.text_input("New Supervisor")
+        if st.button("Add Supervisor") and new_s:
+            supabase.table("production").insert({"Supervisor": new_s, "Notes": "SYSTEM_NEW_ITEM", "Job_Code": "N/A", "Worker": "N/A"}).execute()
             st.success(f"Added {new_s}!")
             st.rerun()
 
-    with tab2:
+    with c2:
         new_j = st.text_input("New Job Code")
-        if st.button("Add Job Code"):
-            supabase.table("production").insert({"Job_Code": new_j, "Notes": "SYSTEM_NEW_JOB", "Supervisor": "N/A", "Worker": "N/A"}).execute()
+        if st.button("Add Job Code") and new_j:
+            supabase.table("production").insert({"Job_Code": new_j, "Notes": "SYSTEM_NEW_ITEM", "Supervisor": "N/A", "Worker": "N/A"}).execute()
             st.success(f"Added {new_j}!")
             st.rerun()
             
-    with tab3:
-        new_w = st.text_input("New Worker Name")
-        if st.button("Add Worker"):
-            supabase.table("production").insert({"Worker": new_w, "Notes": "SYSTEM_NEW_WORKER", "Supervisor": "N/A", "Job_Code": "N/A"}).execute()
+    with c3:
+        new_w = st.text_input("New Worker")
+        if st.button("Add Worker") and new_w:
+            supabase.table("production").insert({"Worker": new_w, "Notes": "SYSTEM_NEW_ITEM", "Supervisor": "N/A", "Job_Code": "N/A"}).execute()
             st.success(f"Added {new_w}!")
             st.rerun()
 
