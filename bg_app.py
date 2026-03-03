@@ -72,46 +72,22 @@ def load_data():
 df = load_data()
 
 # --- 4. PRODUCTION FORM ---
-st.title("🏗️ B&G Production Master")
+# --- 4. DATA LOADING & DROPDOWNS ---
+df = load_data()
 
-with st.form("production_form", clear_on_submit=True):
-    col1, col2 = st.columns(2)
-    with col1:
-        # We populate these from session state or unique values in DB
-        supervisors = sorted(df["Supervisor"].dropna().unique().tolist()) if not df.empty else ["RamaSai", "Ravindra"]
-        supervisor = st.selectbox("Supervisor", ["-- Select --"] + supervisors)
-        
-        workers = sorted(df["Worker"].dropna().unique().tolist()) if not df.empty else []
-        worker = st.selectbox("Worker Name", ["-- Select --"] + workers)
-        
-        jobs = sorted(df["Job_Code"].dropna().unique().tolist()) if not df.empty else []
-        job_code = st.selectbox("Job Code", ["-- Select --"] + jobs)
-        
-        activities = ["Cutting (Plasma/Gas)", "Bending/Rolling", "Marking", "Fitting/Assembly", "Welding", "Grinding"]
-        activity = st.selectbox("Activity", ["-- Select --"] + activities)
-    
-    with col2:
-        unit = st.selectbox("Unit", ["Meters (Mts)", "Components (Nos)", "Layouts (Nos)", "Joints/Points (Nos)"])
-        output = st.number_input("Output Value", min_value=0.0, step=0.1)
-        hours = st.number_input("Hours Spent", min_value=0.0, step=0.5)
-        notes = st.text_area("Notes")
+# 1. Supervisors: Start with your master list, then add any new ones found in DB
+master_supervisors = ["RamaSai", "Ravindra", "Subodth", "Prasanth", "SUNIL"]
+db_supervisors = df["Supervisor"].dropna().unique().tolist() if not df.empty else []
+st.session_state.p_supervisors = sorted(list(set(master_supervisors + db_supervisors)))
 
-    if st.form_submit_button("🚀 Log Production"):
-        if any(v == "-- Select --" for v in [supervisor, worker, job_code, activity]):
-            st.error("❌ Please select all fields.")
-        else:
-            # THIS CAPTURES BOTH CURRENT DATE AND TIME
-            now_ist = datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')
-            
-            new_entry = {
-                "created_at": now_ist,
-                "Supervisor": supervisor, "Worker": worker, "Job_Code": job_code,
-                "Activity": activity, "Unit": unit, "Output": float(output),
-                "Hours": float(hours), "Notes": notes
-            }
-            supabase.table("production").insert(new_entry).execute()
-            st.success("✅ Logged with Time!")
-            st.rerun()
+# 2. Workers: Start empty and grow based on DB records
+st.session_state.p_workers = sorted(df["Worker"].dropna().unique().tolist()) if not df.empty else []
+
+# 3. Job Codes: Start empty and grow based on DB records
+st.session_state.p_jobs = sorted(df["Job_Code"].dropna().unique().tolist()) if not df.empty else []
+
+# 4. Activities: Hardcoded master list
+st.session_state.p_activities = ["Cutting (Plasma/Gas)", "CNC CUTTING", "Bending/Rolling", "Marking", "Fitting/Assembly", "Welding", "Grinding"]
 
 # --- 5. HISTORY & SUMMARY ---
 st.divider()
@@ -127,4 +103,5 @@ if not df.empty:
     display_df = display_df.rename(columns={'created_at': 'Timestamp'})
     
     st.dataframe(display_df.drop(columns=['id']), use_container_width=True)
+
 
